@@ -172,3 +172,27 @@ describe("item 3 · Labels panel", () => {
     expect(L[1].fields.find((f) => f.key === "stage")!.editable).toBe("review");
   });
 });
+
+describe("review fixes (Part 1 coder review)", () => {
+  it("#5 a stored view never keeps search text, and nested objects are rebuilt to their known shape", async () => {
+    const { storedSpec } = await import("@/lib/views");
+    const s = storedSpec({ filters: { signed_date: { from: "2024-01-01", evil: "x" } }, search: "some name", sort: { col: "kind", dir: "asc", junk: 1 } });
+    expect(s.search).toBeUndefined();
+    expect(s.sort).toEqual({ col: "kind", dir: "asc" });
+    expect((s.filters as Record<string, unknown>).signed_date).toEqual({ from: "2024-01-01", to: undefined });
+  });
+  it("#1 Excel export asks the DB for at most limit+1 rows (refused above 10,000)", async () => {
+    const { XLSX_LIMIT } = await import("@/lib/find");
+    expect(exportQuery({ filters: {} }, {}, XLSX_LIMIT + 1).sql).toContain("LIMIT 10001");
+    expect(exportQuery({ filters: {} }, {}, 10 ** 9).sql).toContain("LIMIT 50000");
+  });
+  it("#11 a Drive network failure in name search returns status 0 (codes-only fallback), never throws", async () => {
+    const r = await driveNameSearch("tok", "x", async () => { throw new Error("network down"); });
+    expect(r).toEqual({ ids: [], capped: false, status: 0 });
+  });
+  it("#4 saving over an existing name also moves it to the chosen folder and drops the seed flag", async () => {
+    const { D, sql } = fakeDb();
+    await saveView(D, "a@x", { name: "v", spec: { filters: {} }, folder_id: 1 });
+    expect(sql.find((q) => q.includes("ON CONFLICT (owner_email, name)"))).toContain("folder_id = EXCLUDED.folder_id, is_seed = false");
+  });
+});

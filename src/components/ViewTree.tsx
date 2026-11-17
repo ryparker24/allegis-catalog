@@ -6,20 +6,39 @@ import { Icon } from "./icons";
 
 type Folder = { folder_id: number; name: string; parent_id: number | null; sort: number };
 type View = ViewRef & { is_seed: boolean; folder_id: number | null; pinned: boolean; sort: number };
-type Menu = { kind: "view" | "folder"; id: number } | null;
+/** where: "p" = the PINNED copy of a view, "t" = its place in the tree (a pinned view is drawn twice) */
+type Menu = { kind: "view" | "folder"; id: number; where: "p" | "t"; top: number; left: number } | null;
 type Editing = { kind: "view" | "folder" | "new-folder"; id: number | null; parent?: number | null } | null;
 
 const OPEN_KEY = "catalog.tree.open";
+const MENU_W = 200;
 
-export function useOutside(ref: React.RefObject<HTMLElement | null>, onOut: () => void, active: boolean) {
+/**
+ * Closes a popover on an outside mousedown or Escape. A mousedown on the popover's own trigger is NOT outside
+ * (coder review #2): otherwise the mousedown closes it and the click that follows opens it again.
+ * The trigger is `trigger`, or else the popover's parent `.pop-wrap`.
+ */
+export function useOutside(ref: React.RefObject<HTMLElement | null>, onOut: () => void, active: boolean, trigger?: React.RefObject<HTMLElement | null>) {
   useEffect(() => {
     if (!active) return;
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onOut(); };
+    const h = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!ref.current || ref.current.contains(t)) return;
+      const wrap = trigger?.current ?? ref.current.parentElement?.closest(".pop-wrap");
+      if (wrap && wrap.contains(t)) return;
+      onOut();
+    };
     const k = (e: KeyboardEvent) => { if (e.key === "Escape") onOut(); };
     document.addEventListener("mousedown", h);
     document.addEventListener("keydown", k);
     return () => { document.removeEventListener("mousedown", h); document.removeEventListener("keydown", k); };
-  }, [ref, onOut, active]);
+  }, [ref, onOut, active, trigger]);
+}
+
+/** Opens a popover at a trigger, in fixed position (so a scrolling container can't clip it). */
+export function anchorAt(el: HTMLElement, width = MENU_W): { top: number; left: number } {
+  const r = el.getBoundingClientRect();
+  return { top: Math.min(r.bottom + 4, window.innerHeight - 120), left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)) };
 }
 
 function errText(e: unknown): string {
@@ -40,7 +59,10 @@ export function ViewTree() {
   const [current, setCurrent] = useState<number | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  useOutside(menuRef, () => { setMenu(null); setMoveOpen(false); }, !!menu);
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const closeMenu = useCallback(() => { setMenu(null); setMoveOpen(false); triggerRef.current?.focus(); }, []);
+  const editDone = useRef(false);
+  useOutside(menuRef, closeMenu, !!menu, triggerRef);
 
   const load = useCallback(async () => {
     try {
@@ -53,27 +75,36 @@ export function ViewTree() {
     try { setOpen(JSON.parse(localStorage.getItem(OPEN_KEY) ?? "{}")); } catch { /* ignore */ }
     const a = on(EV.viewsChanged, () => load());
     const b = on<{ viewId: number | null }>(EV.currentView, (d) => setCurrent(d?.viewId ?? null));
-    return () => { a(); b(); };
+    const c = () => setMenu(null);
+    window.addEventListener("resize", c);
+    return () => { a(); b(); window.removeEventListener("resize", c); };
   }, [load]);
+  // focus the first action when a menu opens (keyboard users land inside it)
+  useEffect(() => { if (menu) menuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus(); }, [menu]);
+
   const toggle = (id: number) => setOpen((o) => {
     const n = { ...o, [id]: !(o[id] ?? true) };
     try { localStorage.setItem(OPEN_KEY, JSON.stringify(n)); } catch { /* ignore */ }
     return n;
   });
-
   const apply = (v: View) => {
     if (onFindPage()) emit<ViewRef>(EV.applyView, { view_id: v.view_id, name: v.name, spec: v.spec });
     else window.location.href = `/?view=${v.view_id}`;
   };
   const call = async (fn: () => Promise<unknown>) => {
     setMsg(null);
-    try { await fn(); await load(); emit(EV.viewsChanged + ":local"); } catch (e) { setMsg(errText(e)); }
+    try { await fn(); await load(); emit(EV.treeChanged); } catch (e) { setMsg(errText(e)); }
     setMenu(null); setMoveOpen(false);
   };
   const patchView = (id: number, body: Record<string, unknown>) => call(() => api("/api/views", { method: "PATCH", body: JSON.stringify({ view_id: id, ...body }) }));
   const delView = (id: number) => call(() => api(`/api/views?id=${id}`, { method: "DELETE" }));
   const delFolder = (id: number) => call(() => api(`/api/folders?id=${id}`, { method: "DELETE" }));
+  const startEdit = (e: Editing, name: string) => { editDone.current = false; setDraft(name); setEditing(e); };
+  const cancelEdit = () => { editDone.current = true; setEditing(null); };
+  /** Enter and blur both land here; commit once (coder review #3). */
   const commitEdit = async () => {
+    if (editDone.current) return;
+    editDone.current = true;
     const name = draft.trim();
     const e = editing;
     setEditing(null);
@@ -82,6 +113,13 @@ export function ViewTree() {
     else if (e.kind === "folder") await call(() => api("/api/folders", { method: "PATCH", body: JSON.stringify({ folder_id: e.id, name }) }));
     else await patchView(e.id!, { name });
   };
+  const openMenu = (kind: "view" | "folder", id: number, where: "p" | "t", el: HTMLElement) => {
+    if (menu && menu.kind === kind && menu.id === id && menu.where === where) { setMenu(null); return; }
+    triggerRef.current = el;
+    setMoveOpen(false);
+    setMenu({ kind, id, where, ...anchorAt(el) });
+  };
+  const isMenu = (kind: "view" | "folder", id: number, where: "p" | "t") => !!menu && menu.kind === kind && menu.id === id && menu.where === where;
 
   const top = useMemo(() => folders.filter((f) => f.parent_id == null), [folders]);
   const kids = (id: number) => folders.filter((f) => f.parent_id === id);
@@ -103,79 +141,47 @@ export function ViewTree() {
   const editor = (
     <input className="tree-input" autoFocus value={draft} maxLength={editing?.kind === "view" ? 80 : 60}
       onChange={(e) => setDraft(e.target.value)} onBlur={commitEdit}
-      onKeyDown={(e) => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") setEditing(null); }}
+      onKeyDown={(e) => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") cancelEdit(); }}
       aria-label="Name" />
   );
+  const moreBtn = (kind: "view" | "folder", id: number, where: "p" | "t", label: string) => (
+    <button className="icon-btn more" aria-label={label} aria-haspopup="true" aria-expanded={isMenu(kind, id, where)}
+      onClick={(e) => { e.stopPropagation(); openMenu(kind, id, where, e.currentTarget); }}>
+      <Icon name="more" />
+    </button>
+  );
 
-  const viewRow = (v: View, keyPrefix = "") => (
-    <div key={keyPrefix + v.view_id} className={`tree-row${current === v.view_id ? " on" : ""}`} draggable={!editing}
-      onDragStart={(e) => { e.dataTransfer.setData("text/x-catalog-view", String(v.view_id)); e.dataTransfer.effectAllowed = "move"; }}
-      onClick={() => apply(v)} title={v.name}>
-      <Icon name="view" />
-      {editing?.kind === "view" && editing.id === v.view_id && !keyPrefix ? editor : <span className="nm">{v.name}</span>}
-      {v.pinned && !keyPrefix ? <span className="pin" title="Pinned"><Icon name="pin" /></span> : null}
-      <div className="pop-wrap" ref={menu?.kind === "view" && menu.id === v.view_id ? menuRef : undefined} onClick={(e) => e.stopPropagation()}>
-        <button className="icon-btn more" aria-label={`Actions for ${v.name}`} aria-expanded={menu?.kind === "view" && menu.id === v.view_id}
-          onClick={() => { setMoveOpen(false); setMenu(menu?.kind === "view" && menu.id === v.view_id ? null : { kind: "view", id: v.view_id }); }}>
-          <Icon name="more" />
+  const viewRow = (v: View, where: "p" | "t") => (
+    <div key={where + v.view_id} className={`tree-row${current === v.view_id ? " on" : ""}`} draggable={!editing}
+      onDragStart={(e) => { e.dataTransfer.setData("text/x-catalog-view", String(v.view_id)); e.dataTransfer.effectAllowed = "move"; }}>
+      {editing?.kind === "view" && editing.id === v.view_id && where === "t" ? <><Icon name="view" />{editor}</> : (
+        <button className="nm" onClick={() => apply(v)} title={v.name} aria-current={current === v.view_id ? "true" : undefined}>
+          <Icon name="view" /><span>{v.name}</span>
         </button>
-        {menu?.kind === "view" && menu.id === v.view_id ? (
-          <div className="menu left" role="menu">
-            <button role="menuitem" onClick={() => patchView(v.view_id, { pinned: !v.pinned })}>{v.pinned ? "Unpin" : "Pin"}</button>
-            <button role="menuitem" onClick={() => setMoveOpen((m) => !m)}>Move to…</button>
-            {moveOpen ? (
-              <div style={{ paddingLeft: 12 }}>
-                <button role="menuitem" disabled={v.folder_id == null} onClick={() => patchView(v.view_id, { folder_id: null })}>Top level</button>
-                {top.map((f) => (
-                  <div key={f.folder_id}>
-                    <button role="menuitem" disabled={v.folder_id === f.folder_id} onClick={() => patchView(v.view_id, { folder_id: f.folder_id })}>{f.name}</button>
-                    {kids(f.folder_id).map((k) => (
-                      <button key={k.folder_id} role="menuitem" style={{ paddingLeft: 28 }} disabled={v.folder_id === k.folder_id} onClick={() => patchView(v.view_id, { folder_id: k.folder_id })}>{k.name}</button>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            <button role="menuitem" onClick={() => { setMenu(null); setDraft(v.name); setEditing({ kind: "view", id: v.view_id }); }}>Rename</button>
-            <div className="sep" />
-            <button role="menuitem" className="danger" onClick={() => delView(v.view_id)}>Delete view</button>
-          </div>
-        ) : null}
-      </div>
+      )}
+      {v.pinned && where === "t" ? <span className="pin" title="Pinned" aria-label="Pinned"><Icon name="pin" /></span> : null}
+      {moreBtn("view", v.view_id, where, `Actions for view ${v.name}`)}
     </div>
   );
 
   const folderBlock = (f: Folder, depth: number) => {
     const isOpen = open[f.folder_id] ?? true;
-    const n = viewCount(f.folder_id);
-    const empty = n === 0 && kids(f.folder_id).length === 0;
+    const empty = viewCount(f.folder_id) === 0 && kids(f.folder_id).length === 0;
     return (
       <div key={f.folder_id}>
-        <div className={`tree-row${dropOn === `f${f.folder_id}` ? " drop" : ""}`} onClick={() => toggle(f.folder_id)} {...dropProps(`f${f.folder_id}`, f.folder_id)}>
-          <Icon name={isOpen ? "chevDown" : "chevRight"} />
-          <Icon name={isOpen ? "folderOpen" : "folder"} />
-          {editing?.kind === "folder" && editing.id === f.folder_id ? editor : <span className="nm">{f.name}</span>}
-          <div className="pop-wrap" ref={menu?.kind === "folder" && menu.id === f.folder_id ? menuRef : undefined} onClick={(e) => e.stopPropagation()}>
-            <button className="icon-btn more" aria-label={`Actions for folder ${f.name}`} aria-expanded={menu?.kind === "folder" && menu.id === f.folder_id}
-              onClick={() => setMenu(menu?.kind === "folder" && menu.id === f.folder_id ? null : { kind: "folder", id: f.folder_id })}>
-              <Icon name="more" />
+        <div className={`tree-row${dropOn === `f${f.folder_id}` ? " drop" : ""}`} {...dropProps(`f${f.folder_id}`, f.folder_id)}>
+          {editing?.kind === "folder" && editing.id === f.folder_id ? <><Icon name="folder" />{editor}</> : (
+            <button className="nm" onClick={() => toggle(f.folder_id)} aria-expanded={isOpen}>
+              <Icon name={isOpen ? "chevDown" : "chevRight"} /><Icon name={isOpen ? "folderOpen" : "folder"} /><span>{f.name}</span>
             </button>
-            {menu?.kind === "folder" && menu.id === f.folder_id ? (
-              <div className="menu left" role="menu">
-                {depth === 0 ? <button role="menuitem" onClick={() => { setMenu(null); setOpen((o) => ({ ...o, [f.folder_id]: true })); setDraft(""); setEditing({ kind: "new-folder", id: null, parent: f.folder_id }); }}>New sub-folder</button> : null}
-                <button role="menuitem" onClick={() => { setMenu(null); setDraft(f.name); setEditing({ kind: "folder", id: f.folder_id }); }}>Rename</button>
-                <div className="sep" />
-                <button role="menuitem" className="danger" disabled={!empty} onClick={() => delFolder(f.folder_id)}>Delete folder</button>
-                {!empty ? <div className="hint">Only an empty folder can be deleted. Move its views out first.</div> : null}
-              </div>
-            ) : null}
-          </div>
+          )}
+          {moreBtn("folder", f.folder_id, "t", `Actions for folder ${f.name}`)}
         </div>
         {isOpen ? (
           <div className="tree-children">
             {kids(f.folder_id).map((k) => folderBlock(k, depth + 1))}
             {editing?.kind === "new-folder" && editing.parent === f.folder_id ? <div className="tree-row"><Icon name="folder" />{editor}</div> : null}
-            {inFolder(f.folder_id).map((v) => viewRow(v))}
+            {inFolder(f.folder_id).map((v) => viewRow(v, "t"))}
             {empty && !(editing?.kind === "new-folder" && editing.parent === f.folder_id) ? <div className="tree-empty">Empty. Drag a view here.</div> : null}
           </div>
         ) : null}
@@ -183,15 +189,61 @@ export function ViewTree() {
     );
   };
 
+  // ---------------------------------------------------------------- the open menu (one at a time, fixed position)
+  const mv = menu?.kind === "view" ? views.find((v) => v.view_id === menu.id) : undefined;
+  const mf = menu?.kind === "folder" ? folders.find((f) => f.folder_id === menu.id) : undefined;
+  const mfEmpty = mf ? viewCount(mf.folder_id) === 0 && kids(mf.folder_id).length === 0 : false;
+  const menuEl = menu ? (
+    <div ref={menuRef} className="menu fixed" style={{ top: menu.top, left: menu.left, minWidth: MENU_W }}
+      onKeyDown={(e) => {
+        if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+        e.preventDefault();
+        const items = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
+        const i = items.indexOf(document.activeElement as HTMLButtonElement);
+        items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+      }}>
+      {mv ? (
+        <>
+          <button onClick={() => patchView(mv.view_id, { pinned: !mv.pinned })}>{mv.pinned ? "Unpin" : "Pin"}</button>
+          <button aria-expanded={moveOpen} onClick={() => setMoveOpen((m) => !m)}>Move to… <Icon name={moveOpen ? "chevDown" : "chevRight"} className="small" /></button>
+          {moveOpen ? (
+            <div className="submenu">
+              <button disabled={mv.folder_id == null} onClick={() => patchView(mv.view_id, { folder_id: null })}>Top level</button>
+              {top.map((f) => (
+                <div key={f.folder_id}>
+                  <button disabled={mv.folder_id === f.folder_id} onClick={() => patchView(mv.view_id, { folder_id: f.folder_id })}>{f.name}</button>
+                  {kids(f.folder_id).map((k) => (
+                    <button key={k.folder_id} className="indent" disabled={mv.folder_id === k.folder_id} onClick={() => patchView(mv.view_id, { folder_id: k.folder_id })}>{k.name}</button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <button onClick={() => { setMenu(null); startEdit({ kind: "view", id: mv.view_id }, mv.name); }}>Rename</button>
+          <div className="sep" />
+          <button className="danger" onClick={() => delView(mv.view_id)}>Delete view</button>
+        </>
+      ) : mf ? (
+        <>
+          {mf.parent_id == null ? <button onClick={() => { setMenu(null); setOpen((o) => ({ ...o, [mf.folder_id]: true })); startEdit({ kind: "new-folder", id: null, parent: mf.folder_id }, ""); }}>New sub-folder</button> : null}
+          <button onClick={() => { setMenu(null); startEdit({ kind: "folder", id: mf.folder_id }, mf.name); }}>Rename</button>
+          <div className="sep" />
+          <button className="danger" disabled={!mfEmpty} onClick={() => delFolder(mf.folder_id)}>Delete folder</button>
+          {!mfEmpty ? <div className="hint">Only an empty folder can be deleted. Move its views out first.</div> : null}
+        </>
+      ) : null}
+    </div>
+  ) : null;
+
   return (
     <div className="tree" aria-label="Saved views">
       <div className={`tree-head${dropOn === "top" ? " drop" : ""}`} {...dropProps("top", null)}>
         <span className="cap">Saved views</span>
-        <button className="icon-btn" title="New folder" aria-label="New folder" onClick={() => { setDraft(""); setEditing({ kind: "new-folder", id: null, parent: null }); }}>
+        <button className="icon-btn" title="New folder" aria-label="New folder" onClick={() => startEdit({ kind: "new-folder", id: null, parent: null }, "")}>
           <Icon name="plus" />
         </button>
       </div>
-      {msg ? <div className="tree-empty" role="alert" style={{ color: "#f0a59c", fontStyle: "normal" }}>{msg}</div> : null}
+      {msg ? <div className="tree-msg" role="alert">{msg}</div> : null}
       {pinned.length ? (
         <>
           <div className="tree-group">Pinned</div>
@@ -201,8 +253,9 @@ export function ViewTree() {
       ) : null}
       {top.map((f) => folderBlock(f, 0))}
       {editing?.kind === "new-folder" && editing.parent == null ? <div className="tree-row"><Icon name="folder" />{editor}</div> : null}
-      {inFolder(null).map((v) => viewRow(v))}
+      {inFolder(null).map((v) => viewRow(v, "t"))}
       {!views.length && !folders.length ? <div className="tree-empty">No saved views yet.</div> : null}
+      {menuEl}
     </div>
   );
 }

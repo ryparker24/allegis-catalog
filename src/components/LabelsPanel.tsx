@@ -1,26 +1,36 @@
 "use client";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./client";
 import { Icon } from "./icons";
 
 type Choice = { code: string; meaning: string };
-type Field = { key: string; title: string; about: string; type: string; multi: boolean; editable: "review" | "machine" | "never"; choices: Choice[] };
+type Field = { key: string; title: string; about: string; type: string; multi: boolean; editable: "review" | "machine" | "never" | "part2"; choices: Choice[] };
 type Label = { key: string; title: string; about: string; fields: Field[] };
 
 const ED: Record<Field["editable"], [string, string, string]> = {
   review: ["ed-review", "Editable: Review queue", "The Review queue writes this field on the file, as you."],
   machine: ["ed-machine", "Machine-set", "Set by the catalog rules and the labelling run. Not editable in the app yet."],
   never: ["ed-never", "Read-only", "Never editable in the app."],
+  part2: ["ed-part2", "Editable after Part 2", "Machine-set today. CAT-WO-02 Part 2 makes it editable in Find and Review (written on the file as you)."],
 };
 
 /** Item 3: the Labels side panel. Reads labels_schema.json + ref (via /api/labels); never edits. */
 export function LabelsPanel({ onClose }: { onClose: () => void }) {
+  const box = useRef<HTMLElement | null>(null);
   const [labels, setLabels] = useState<Label[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
   useEffect(() => { api<{ labels: Label[] }>("/api/labels").then((r) => setLabels(r.labels)).catch((e) => setErr((e as Error).message)); }, []);
   useEffect(() => {
-    const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const k = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key !== "Tab" || !box.current) return; // keep focus inside the dialog
+      const f = [...box.current.querySelectorAll<HTMLElement>("button, input, summary, [tabindex]:not([tabindex='-1'])")].filter((x) => x.offsetParent !== null);
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
     document.addEventListener("keydown", k);
     return () => document.removeEventListener("keydown", k);
   }, [onClose]);
@@ -37,7 +47,7 @@ export function LabelsPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="drawer-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="labels-title">
+      <aside ref={box} className="drawer" role="dialog" aria-modal="true" aria-labelledby="labels-title">
         <div className="drawer-head">
           <div style={{ flex: 1 }}>
             <div className="crumb">Allegis Capital · Catalog · Drive labels</div>

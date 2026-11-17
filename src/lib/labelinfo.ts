@@ -10,8 +10,8 @@ type FieldDef = { field_id: string; type: string; choices?: Record<string, strin
 type LabelDef = { label_id: string; title: string; fields: Record<string, FieldDef> };
 const S = schema as unknown as Record<string, LabelDef>;
 
-/** Who sets a field. "review" = the Review queue writes it today; "machine" = catalog rules / labelling run only. */
-export type Editable = "review" | "machine" | "never";
+/** Who sets a field. "review" = the Review queue writes it today; "part2" = machine-set until CAT-WO-02 Part 2 (R-023) makes it app-editable; "machine" = catalog rules / labelling run only; "never" = Handling. */
+export type Editable = "review" | "machine" | "never" | "part2";
 interface FieldMeta { title: string; about: string; editable: Editable; vocab?: VocabList | "entity" | "portco" }
 
 export const LABEL_ABOUT: Record<string, string> = {
@@ -23,12 +23,12 @@ export const LABEL_ABOUT: Record<string, string> = {
 
 export const FIELD_META: Record<string, Record<string, FieldMeta>> = {
   doc: {
-    kind: { title: "Kind", about: "The type of document.", editable: "machine", vocab: "kind" },
-    entity: { title: "Entity", about: "The Allegis fund, GP or management company the document belongs to (one or more).", editable: "machine", vocab: "entity" },
-    portco: { title: "Portco", about: "The portfolio company the document is about (one or more).", editable: "machine", vocab: "portco" },
-    fiscal_year: { title: "Fiscal year", about: "The fiscal or tax year the document covers.", editable: "machine" },
-    period: { title: "Period", about: "The part of the year the document covers.", editable: "machine", vocab: "period" },
-    effective_date: { title: "Effective date", about: "The date the document takes effect or is dated.", editable: "machine" },
+    kind: { title: "Kind", about: "The type of document.", editable: "part2", vocab: "kind" },
+    entity: { title: "Entity", about: "The Allegis fund, GP or management company the document belongs to (one or more).", editable: "part2", vocab: "entity" },
+    portco: { title: "Portco", about: "The portfolio company the document is about (one or more).", editable: "part2", vocab: "portco" },
+    fiscal_year: { title: "Fiscal year", about: "The fiscal or tax year the document covers.", editable: "part2" },
+    period: { title: "Period", about: "The part of the year the document covers.", editable: "part2", vocab: "period" },
+    effective_date: { title: "Effective date", about: "The date the document takes effect or is dated.", editable: "part2" },
     workstream: { title: "Workstream", about: "The finance workstream the file was filed under.", editable: "machine", vocab: "workstream" },
     issuer: { title: "Issuer type", about: "What sort of party produced the document.", editable: "machine", vocab: "issuer" },
     catalog_id: { title: "Catalog ID", about: "The catalog's document number, linking the file to its catalog record.", editable: "machine" },

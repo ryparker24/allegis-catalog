@@ -27,7 +27,8 @@ BEGIN
         -- a folder that has children cannot itself move under another folder (that would make 3 levels)
         RETURN NEW;
     END IF;
-    SELECT owner_email, parent_id INTO p FROM app.view_folder WHERE folder_id = NEW.parent_id;
+    -- FOR UPDATE: two concurrent moves (X under Y, Z under X) serialise here, so neither can make 3 levels
+    SELECT owner_email, parent_id INTO p FROM app.view_folder WHERE folder_id = NEW.parent_id FOR UPDATE;
     IF NOT FOUND OR p.owner_email <> NEW.owner_email THEN
         RAISE EXCEPTION 'view_folder: parent not found' USING ERRCODE = 'foreign_key_violation';
     END IF;
@@ -91,7 +92,7 @@ FROM (VALUES ('Tax', 'K-1s · tax year 2025'), ('Agreements', 'ACCSO · subscrip
              ('Agreements', 'Unsigned side letters'), ('Close', 'MTV-II · FY2025 close')) s(folder, view_name),
      app.view_folder f
 WHERE sv.is_seed AND sv.name = s.view_name AND sv.folder_id IS NULL
-  AND f.owner_email = sv.owner_email AND f.parent_id IS NULL AND f.name = s.folder;
+  AND f.owner_email = sv.owner_email AND f.parent_id IS NULL AND lower(f.name) = lower(s.folder);
 
 COMMIT;
 

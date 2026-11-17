@@ -16,6 +16,7 @@ export function AppShell({ email, active, signedIn, children }: { email: string 
   const [q, setQ] = useState("");
   const [userMenu, setUserMenu] = useState(false);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const labelsBtn = useRef<HTMLButtonElement | null>(null);
   const userRef = useRef<HTMLDivElement | null>(null);
   useOutside(userRef, () => setUserMenu(false), userMenu);
 
@@ -50,7 +51,8 @@ export function AppShell({ email, active, signedIn, children }: { email: string 
         <div className="brand">
           <Emblem />
           <div className="word-wrap">
-            <div className="word">Allegis Capital</div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img className="wordmark" src="/allegis-wordmark.svg" alt="Allegis Capital" />
             <div className="sub">Catalog</div>
           </div>
           <button className="icon-btn collapse" onClick={toggleRail} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={collapsed ? "Expand" : "Collapse"}>
@@ -80,17 +82,17 @@ export function AppShell({ email, active, signedIn, children }: { email: string 
               placeholder="Search names, codes… ( / )" aria-label="Search names, kinds, entity and portco codes" maxLength={100} />
           </form>
           <div className="right">
-            <button className="btn-rail" onClick={() => setLabelsOpen(true)} aria-expanded={labelsOpen} disabled={!signedIn}>
-              <Icon name="tag" />Labels
+            <button ref={labelsBtn} className="btn-rail" onClick={() => setLabelsOpen(true)} aria-haspopup="dialog" disabled={!signedIn}>
+              <Icon name="tag" /><span className="lbl">Labels</span>
             </button>
             {email ? (
               <div className="pop-wrap" ref={userRef}>
-                <button className="avatar" onClick={() => setUserMenu((m) => !m)} aria-label="Account" aria-expanded={userMenu} title={email}>{initials}</button>
+                <button className="avatar" onClick={() => setUserMenu((m) => !m)} aria-label="Account" aria-haspopup="true" aria-expanded={userMenu} title={email}>{initials}</button>
                 {userMenu ? (
-                  <div className="menu" role="menu">
+                  <div className="menu">
                     <div className="hint">{email}</div>
                     <div className="sep" />
-                    <form method="post" action="/api/auth/logout"><button role="menuitem">Sign out</button></form>
+                    <form method="post" action="/api/auth/logout"><button>Sign out</button></form>
                   </div>
                 ) : null}
               </div>
@@ -99,7 +101,7 @@ export function AppShell({ email, active, signedIn, children }: { email: string 
         </header>
         <main className="main">{children}</main>
       </div>
-      {labelsOpen ? <LabelsPanel onClose={() => setLabelsOpen(false)} /> : null}
+      {labelsOpen ? <LabelsPanel onClose={() => { setLabelsOpen(false); labelsBtn.current?.focus(); }} /> : null}
     </div>
   );
 }
@@ -113,15 +115,15 @@ export function PageHeader({ title, info, actions, desc }: { title: string; info
     <div className="page-header">
       <div>
         <div className="crumb">Allegis Capital · Catalog</div>
-        <h1 className="page-title">
-          {title}
+        <div className="title-row">
+          <h1 className="page-title">{title}</h1>
           {info ? (
             <span ref={ref} style={{ position: "relative" }}>
-              <button className="info-chip" aria-label={`About ${title}`} aria-expanded={open} onClick={() => setOpen((o) => !o)}>i</button>
+              <button className="info-chip" aria-label={`About this page`} aria-expanded={open} onClick={() => setOpen((o) => !o)}>i</button>
               {open ? <span className="info-pop" role="note">{info}</span> : null}
             </span>
           ) : null}
-        </h1>
+        </div>
         {desc ? <div className="page-desc">{desc}</div> : null}
       </div>
       {actions ? <div className="page-actions">{actions}</div> : null}

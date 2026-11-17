@@ -7,7 +7,8 @@ export type ViewRef = { view_id: number; name: string; spec: Record<string, unkn
 export const EV = {
   applyView: "catalog:apply-view",     // detail: ViewRef
   search: "catalog:search",            // detail: { q: string }
-  viewsChanged: "catalog:views-changed",
+  viewsChanged: "catalog:views-changed", // Find saved/updated a view -> the rail reloads
+  treeChanged: "catalog:tree-changed",   // the rail renamed/moved/deleted something -> Find re-reads its current view
   currentView: "catalog:current-view", // detail: { viewId: number | null }
   findReady: "catalog:find-ready",
 } as const;

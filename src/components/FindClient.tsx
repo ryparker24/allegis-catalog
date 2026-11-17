@@ -179,6 +179,7 @@ export function FindClient() {
   const [dragCol, setDragCol] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
   const reqId = useRef(0);
+  const userActed = useRef(false); // a rail click or a search before the start-up load finished wins (coder review #7)
   const closePop = useCallback(() => setPop(null), []);
 
   // ---------------------------------------------------------------- start: URL (?view= / ?q=), else the last state
@@ -195,6 +196,7 @@ export function FindClient() {
           if (v) { applyStored(v.view_id, v.name, v.spec, q); return; }
         }
         const p = await api<{ value: Record<string, unknown> | null }>("/api/prefs?key=find");
+        if (userActed.current) return;
         if (p.value) {
           const s = fromStored(p.value);
           setSpec({ ...s.spec, search: q || undefined });
@@ -224,9 +226,20 @@ export function FindClient() {
 
   // shell events: a view clicked in the rail; a search from the top bar
   useEffect(() => {
-    const a = on<ViewRef>(EV.applyView, (v) => applyStored(v.view_id, v.name, v.spec, undefined));
-    const b = on<{ q: string }>(EV.search, (d) => setSpec((s) => ({ ...s, page: 0, search: d.q || undefined })));
-    return () => { a(); b(); };
+    const a = on<ViewRef>(EV.applyView, (v) => { userActed.current = true; applyStored(v.view_id, v.name, v.spec, undefined); });
+    const b = on<{ q: string }>(EV.search, (d) => { userActed.current = true; setReady(true); setSpec((s) => ({ ...s, page: 0, search: d.q || undefined })); });
+    // the rail renamed or deleted the view shown here (coder review #8)
+    const c = on(EV.treeChanged, async () => {
+      const r = await api<{ views: SavedView[] }>("/api/views").catch(() => null);
+      if (!r) return;
+      setCurrent((cur) => {
+        if (!cur) return cur;
+        const v = r.views.find((x) => x.view_id === cur.id);
+        if (!v) { emit(EV.currentView, { viewId: null }); return null; }
+        return v.name === cur.name ? cur : { ...cur, name: v.name };
+      });
+    });
+    return () => { a(); b(); c(); };
   }, []);
 
   // ---------------------------------------------------------------- run (server-side SQL + live page check)
@@ -312,6 +325,7 @@ export function FindClient() {
     setPop(null);
     const r = await fetch(`/api/export?format=${format}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(wire(spec)) });
     if (r.status === 401) { window.location.href = `/api/auth/login?next=${encodeURIComponent(window.location.pathname)}`; return; }
+    if (r.status === 413) { const b = await r.json().catch(() => ({})) as { limit?: number }; setNote(`Excel is limited to ${(b.limit ?? 10000).toLocaleString()} rows. Narrow the filters, or use Download CSV (up to 50,000).`); return; }
     if (!r.ok) { setErr(`export failed (${r.status})`); return; }
     const url = URL.createObjectURL(await r.blob());
     const a = document.createElement("a"); a.href = url; a.download = `catalog-export-${new Date().toISOString().slice(0, 10)}.${format}`; a.click();

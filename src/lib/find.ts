@@ -222,11 +222,13 @@ export function groupQuery(spec: FindSpec, opts: WhereOpts = {}): (Built & { sql
 }
 
 export const EXPORT_LIMIT = 50_000;
+/** Excel is built in Worker memory (~85 bytes of XML per cell): capped well under the 128 MB isolate limit. */
+export const XLSX_LIMIT = 10_000;
 export const EXPORT_COLS = ["file_id", "document_id", "kind", "entities", "portcos", "fiscal_year", "period", "stage", "signed_date", "effective_date", "workstream", "tier", "is_primary", "modified_time", "web_view_link"];
 /** CSV / Excel export: codes and Drive links only - no names. */
-export function exportQuery(spec: FindSpec, opts: WhereOpts = {}): Built & { sql: string } {
+export function exportQuery(spec: FindSpec, opts: WhereOpts = {}, limit = EXPORT_LIMIT): Built & { sql: string } {
   const { where, params } = buildWhere(spec, opts);
-  return { where, params, sql: `SELECT ${EXPORT_COLS.join(", ")} FROM app.v_find ${where} ${orderBy(spec)} LIMIT ${EXPORT_LIMIT}` };
+  return { where, params, sql: `SELECT ${EXPORT_COLS.join(", ")} FROM app.v_find ${where} ${orderBy(spec)} LIMIT ${Math.max(1, Math.min(EXPORT_LIMIT, Math.floor(limit)))}` };
 }
 
 export function exportCell(v: unknown): string {
@@ -272,10 +274,16 @@ export function parseSpec(x: unknown): FindSpec {
   const filters = (o.filters ?? {}) as Record<string, unknown>;
   if (typeof filters !== "object" || Array.isArray(filters)) throw new SpecError("filters: not an object");
   for (const k of Object.keys(filters)) if (!FILTER_KEYS.has(k)) throw new SpecError(`filters: unknown key ${k.slice(0, 40).replace(/[^a-z_]/gi, "")}`);
+  // rebuild nested objects so nothing beyond the known shape is ever stored (coder review #5)
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(filters)) {
+    clean[k] = v && typeof v === "object" && !Array.isArray(v) ? { from: (v as Range).from ?? undefined, to: (v as Range).to ?? undefined } : v;
+  }
+  const so = o.sort as { col?: unknown; dir?: unknown } | undefined;
   const spec: FindSpec = {
-    filters: filters as FindSpec["filters"],
+    filters: clean as FindSpec["filters"],
     search: parseSearch(o.search) ?? undefined,
-    sort: o.sort as FindSpec["sort"],
+    sort: so ? { col: String(so.col ?? ""), dir: so.dir === "asc" ? "asc" : "desc" } : undefined,
     groupBy: (o.groupBy as string | null) ?? null,
     page: Number(o.page ?? 0),
     pageSize: o.pageSize == null ? undefined : Number(o.pageSize),

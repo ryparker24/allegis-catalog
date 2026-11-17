@@ -17,7 +17,8 @@ export function cleanName(x: unknown, max: number): string | null {
 
 /** View spec as stored: the validated FindSpec plus its layout (columns, order, widths), page reset to 0. */
 export function storedSpec(x: unknown): Record<string, unknown> {
-  const spec = parseSpec(x);
+  const { search: _search, ...spec } = parseSpec(x); // search text is never stored (it can hold name fragments)
+  void _search;
   return { ...spec, page: 0, ...parseLayout(x) };
 }
 
@@ -36,13 +37,14 @@ export async function seed(D: Db, owner: string): Promise<void> {
   for (const f of SEED_FOLDERS) {
     await D.exec(
       `INSERT INTO app.view_folder (owner_email, name, sort) SELECT $1, $2, $3
-       WHERE NOT EXISTS (SELECT 1 FROM app.view_folder WHERE owner_email = $1 AND parent_id IS NULL AND lower(name) = lower($2))`,
+       WHERE NOT EXISTS (SELECT 1 FROM app.view_folder WHERE owner_email = $1 AND parent_id IS NULL AND lower(name) = lower($2))
+       ON CONFLICT DO NOTHING`,
       [owner, f.name, f.sort]);
   }
   for (const s of SEED_VIEWS) {
     await D.exec(
       `INSERT INTO app.saved_view (owner_email, name, spec, is_seed, sort, folder_id)
-       VALUES ($1, $2, $3::jsonb, true, $4, (SELECT folder_id FROM app.view_folder WHERE owner_email = $1 AND parent_id IS NULL AND name = $5 LIMIT 1))
+       VALUES ($1, $2, $3::jsonb, true, $4, (SELECT folder_id FROM app.view_folder WHERE owner_email = $1 AND parent_id IS NULL AND lower(name) = lower($5) LIMIT 1))
        ON CONFLICT (owner_email, name) DO NOTHING`,
       [owner, s.name, JSON.stringify(s.spec), s.sort, s.folder]);
   }
@@ -69,7 +71,7 @@ export async function saveView(D: Db, owner: string, body: Record<string, unknow
   }
   const r = await D.rows<{ view_id: number }>(
     `INSERT INTO app.saved_view (owner_email, name, spec, sort, folder_id) VALUES ($1, $2, $3::jsonb, 100, $4)
-     ON CONFLICT (owner_email, name) DO UPDATE SET spec = EXCLUDED.spec, updated_at = now()
+     ON CONFLICT (owner_email, name) DO UPDATE SET spec = EXCLUDED.spec, folder_id = EXCLUDED.folder_id, is_seed = false, updated_at = now()
      RETURNING view_id::int AS view_id`,
     [owner, name, JSON.stringify(spec), folder]);
   return { ok: true, id: r[0]?.view_id };

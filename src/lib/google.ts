@@ -180,9 +180,14 @@ export async function driveNameSearch(accessToken: string, term: string, f: Fetc
       fields: "nextPageToken,files(id)", pageSize: "1000",
     });
     if (pageToken) q.set("pageToken", pageToken);
-    const r = await f(`https://www.googleapis.com/drive/v3/files?${q}`, { headers: { authorization: `Bearer ${accessToken}` } });
-    if (!r.ok) return { ids, capped: false, status: r.status };
-    const j = (await r.json()) as { files?: { id?: string }[]; nextPageToken?: string };
+    let j: { files?: { id?: string }[]; nextPageToken?: string };
+    try {
+      const r = await f(`https://www.googleapis.com/drive/v3/files?${q}`, { headers: { authorization: `Bearer ${accessToken}` } });
+      if (!r.ok) return { ids, capped: false, status: r.status };
+      j = (await r.json()) as typeof j;
+    } catch {
+      return { ids, capped: false, status: 0 }; // network / parse failure: the caller falls back to codes only
+    }
     for (const x of j.files ?? []) if (x.id && FILE_ID_RE.test(x.id)) ids.push(x.id);
     pageToken = j.nextPageToken ?? "";
     if (!pageToken) return { ids, capped: false, status: 200 };

@@ -32,6 +32,7 @@ export async function PUT(req: Request) {
   } catch (e) {
     return json({ error: "bad_spec", reason: e instanceof SpecError ? e.message : "invalid" }, 400);
   }
+  if (JSON.stringify(value).length > 30_000) return json({ error: "too_large" }, 400);
   await db(env).exec(
     `INSERT INTO app.user_pref (owner_email, pref_key, value) VALUES ($1, $2, $3::jsonb)
      ON CONFLICT (owner_email, pref_key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
