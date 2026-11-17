@@ -155,8 +155,11 @@ export function parseSpec(x: unknown): FindSpec {
 }
 
 export const SEED_VIEWS: { name: string; sort: number; spec: FindSpec & { columns?: string[] } }[] = [
-  { name: "K-1s, latest year first", sort: 1, spec: { filters: { kind: ["k1"] }, sort: { col: "fiscal_year", dir: "desc" }, groupBy: "fiscal_year" } },
-  { name: "Signed agreements (primary copies)", sort: 2, spec: { filters: { stage: ["fully_executed"], primary_only: true }, sort: { col: "signed_date", dir: "desc" }, groupBy: "kind" } },
-  { name: "Bank statements by entity", sort: 3, spec: { filters: { kind: ["bank_stmt"] }, sort: { col: "fiscal_year", dir: "desc" }, groupBy: "entity" } },
-  { name: "No kind yet", sort: 4, spec: { filters: { kind: [NONE] }, sort: { col: "modified_time", dir: "desc" } } },
+  // Designs v0.1. All four carry "primary copy only".
+  // "MTV-II · FY2025 close": no workstream filter. ref.vocab(workstream) has no single close/financial-reporting
+  // code (candidates: reporting, regulatory, accounting [legacy]), so per the follow-up order it is left off.
+  { name: "ACCSO · subscription docs", sort: 1, spec: { filters: { kind: ["subscription_agreement"], entity: ["ACCSO"], primary_only: true }, sort: { col: "signed_date", dir: "desc" } } },
+  { name: "MTV-II · FY2025 close", sort: 2, spec: { filters: { entity: ["MTV-II"], fiscal_year: [2025], primary_only: true }, sort: { col: "modified_time", dir: "desc" }, groupBy: "kind" } },
+  { name: "Unsigned side letters", sort: 3, spec: { filters: { kind: ["side_letter"], stage: ["draft", "final_unexecuted", "partially_executed"], primary_only: true }, sort: { col: "modified_time", dir: "desc" }, groupBy: "stage" } },
+  { name: "K-1s · tax year 2025", sort: 4, spec: { filters: { kind: ["k1"], fiscal_year: [2025], primary_only: true }, sort: { col: "modified_time", dir: "desc" }, groupBy: "entity" } },
 ];
