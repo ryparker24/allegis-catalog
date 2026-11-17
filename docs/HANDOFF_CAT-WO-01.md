@@ -102,12 +102,12 @@ POST /api/review/confirm for a file not in the queue       404 {"error":"not_in_
 
 - **Decision 1:** default applied (labelled files only). **Decision 2:** default applied (restricted shown, badged, still subject to the live check; none exist in scope today).
 - **Deviation: a third app table, `app.labelled_file`.** The order lists two tables, but the catalog DB has no record of which files carry the label: `cat.file.drive_labels` is empty on all 202,507 rows until CAT-WO-02's read-back. The labelled set exists only in the local resume list `labels_done.txt`. `db/load_labelled.py` loads those IDs (IDs only). `catalog_app` has no grant on the table; it is read only through the views. CAT-WO-02 should replace it with the read-back.
-- **Seed views:** the four seeds are my stand-ins ("K-1s, latest year first", "Signed agreements (primary copies)", "Bank statements by entity", "No kind yet"), because designs v0.1 are not in this workspace. Edit `SEED_VIEWS` in `src/lib/find.ts` to match the design. Seeds are inserted per user on first visit.
+- **Seed views:** *(superseded: replaced with the designs v0.1 views, see "Follow-up" below)* the four seeds were my stand-ins ("K-1s, latest year first", "Signed agreements (primary copies)", "Bank statements by entity", "No kind yet"), because designs v0.1 are not in this workspace. Edit `SEED_VIEWS` in `src/lib/find.ts` to match the design. Seeds are inserted per user on first visit.
 - **"Fully executed at low confidence"** = the document's stage is `fully_executed` and the content check's confidence is `low` (330). Counting by the scan's suggested stage instead gives 285.
 - **Export** reads the DB only (codes plus links, no names, up to 50k rows) and is not live-checked per row. A link opens only if Google allows it.
 - **Stack:** "same as Datum" could not be checked, because I did not open the Datum repo, as instructed. I used OpenNext (`@opennextjs/cloudflare`); swap if Datum uses vinext.
 - **Item 4 live check:** a second write (the restore) went to the same single file, so Drive was left as found.
-- **Review lane:** items 2, 4 and 5 (roles, Drive write path, access) still need the coder + CISO review named in the order. I have not run it.
+- **Review lane:** *(superseded: run, see "Follow-up" below)* items 2, 4 and 5 (roles, Drive write path, access) still need the coder + CISO review named in the order. I have not run it.
 - **Dependency note:** `app.v_find` depends on `cat.v_file_entity`, `cat.v_file_portco`, `cat.file`, `cat.document`, `cat.file_document` and `cat.doc_content_check`. A future `cat` migration that DROPs one of these must re-run `001_app_schema.sql` and `002_catalog_app_grants.sql`. No local script does this today.
 
 ## Waiting on Ryan
@@ -138,3 +138,150 @@ Then the other Worker secrets: `npx wrangler secret put GOOGLE_CLIENT_ID` / `GOO
 
 ### Throwaway branch
 Neon branch `catwo01-test-throwaway` (`br-spring-frost-bdrt8htx`) on `curly-sunset-06555843` holds the rehearsed `app` schema, `catalog_app` and one test `review_event`. Delete it when done (I did not, because branch deletion is destructive). Main was only read (item 0); it was never written.
+
+---
+
+## Follow-up (after Ryan accepted `app.labelled_file`, OpenNext and the Decision 1/2 defaults)
+
+Commits: `0237ae4` (seed views), `04a57a4` (review fixes), then this handoff update.
+
+### 1 · Seed views from designs v0.1
+
+`SEED_VIEWS` in `src/lib/find.ts`. All four have "primary copy only" on.
+
+| View | Filters | Rows on the branch DB |
+|---|---|---|
+| ACCSO · subscription docs | kind = `subscription_agreement`, entity = `ACCSO` | **14** |
+| MTV-II · FY2025 close | entity = `MTV-II`, fiscal year = 2025 | **2** |
+| Unsigned side letters | kind = `side_letter`, stage in (`draft`, `final_unexecuted`, `partially_executed`) | **25** |
+| K-1s · tax year 2025 | kind = `k1`, fiscal year = 2025 | **615** |
+
+- **Workstream left off "MTV-II · FY2025 close".** `ref.vocab` (list `workstream`, 21 codes) has no single close or financial-reporting code. The candidates are `reporting` ("Reporting (All Reports)"), `regulatory` ("Regulatory reporting") and `accounting` ("Accounting (legacy)"). None is clearly the close workstream, so per the order the filter is left off. Add it to the seed once a code is chosen.
+- **How the counts were made.** `npx tsx scripts/seed_view_counts.ts --url-file <catalog_app branch URL>` runs the app's own WHERE builder as `catalog_app`, so the grants and the secret-tier exclusion both apply. The real Worker gave the same totals when it ran each seed (smoke output below).
+- **Fiscal year stored as strings.** The years are stored as `"2025"` so the facet checkbox matches the stored value (review finding C3).
+- **Seeding.** Seeds are inserted per user on first visit, so on main they appear the first time Ryan opens the app.
+
+### 2 · Coder + CISO review
+
+Two reviewer subagents ran read-only (tsc, unit tests, grep; no DB, network or file edits).
+
+**CISO.** Items 1–6 all **PASS**:
+1. The Access JWT check verifies signature, iss, aud and exp, and fails closed.
+2. Google sign-in requires `email_verified`, `hd`, the email domain and the allowlist. State and PKCE are bound to the browser, there is no open redirect, and `access_type=online`.
+3. The session is AES-256-GCM with an HKDF key and random IV, and fails closed on tamper. The cookie is `__Host-`, HttpOnly, Secure and SameSite=Lax, and expires with the token on both sides. Logout is POST-only.
+4. `catalog_app` grants are as specified. `review_event` is append-only by grant and by trigger, and the views are `security_barrier`. There is no SECURITY DEFINER function or default-privilege widening, and saved views are owner-scoped.
+5. The review write touches only the Execution and Catalog Review labels, requires the file to be in the queue, and is made as the user.
+6. No `console.*` call outside `log.ts`. Drive error bodies are never logged or returned.
+
+**Coder.** Find SQL, the schema-to-code column match, grants against the statements the app runs, saved views, the live check, the review write, the auth flow and the 409 consent flow all work.
+
+| # | Finding (reviewer) | Real defect? | What was done |
+|---|---|---|---|
+| S1 | No Origin/CSRF check on POST/DELETE. SameSite=Lax doesn't stop a page on a sibling `*.allegis.app` host from submitting a `text/plain` form (CISO, Low) | yes | **Fixed.** `guard.checkSameOrigin`: every non-GET request needs `Origin == APP_ORIGIN`, and a POST body must be `application/json`. |
+| S2 | The log sanitizer's `CODE_SHAPED` pattern matches typical file names, so a name under an allowed key would pass. No call site does this today (CISO, Info) | latent | **Fixed.** Per-key shapes: ID keys accept only `[A-Za-z0-9_-]`, with no dots or spaces; every other string key accepts only lowercase snake_case codes. |
+| C1 | The Review queue can stall. Rows the live check drops never leave the queue, the client always reloaded page 0, and there was no next-page control (Coder, defect) | yes | **Fixed.** The route walks forward up to 4 pages per request until something is shown and returns `nextPage`. The client keeps its page and shows a "Next page" button when a page shows nothing. |
+| C2 | The skip list grows without limit in the query string. The server reads 500, so the URL risks a 414 (Coder, minor) | yes | **Fixed.** The client keeps the last 400 skips. |
+| C3 | Seed fiscal year stored as a number while facet values are strings, so the checkbox state is wrong (Coder, minor) | yes | **Fixed.** Stored as strings. |
+| C4 | Saving a view drops the `executed_date` and `review_status` columns (Coder, minor) | yes | **Fixed.** Both are allowed as display-only columns. |
+| C5 | A batch-level Drive failure (400, or a 403 scope error) and per-item `dailyLimitExceeded` were counted as "no access" (Coder, minor) | yes | **Fixed.** A batch-level non-401 failure now counts as check failed, and `*LimitExceeded` counts as transient. |
+| C6 | CSV export is not live-checked per row (Coder, flagged for CISO) | no, as designed | **Not changed.** This was already recorded under Deviations: codes and links only, no names, and a link opens only if Google allows it. If Ryan wants export to drop files he can't open, it costs one Drive batch per 50 rows. |
+| C7 | Export used a raw `fetch`, so an expired session showed "export failed (401)" (Coder, minor) | yes | **Fixed.** A 401 now goes to sign-in. |
+
+**Tests after the fixes:**
+- `npx tsc --noEmit` is clean.
+- `npm test` passes **45/45**: the original 33 plus 12 in `test/review_fixes.test.ts`. Those cover the CSRF cases, the sanitizer shapes, batch-level failures, the `*LimitExceeded` reasons, and the seed-view shape.
+
+**Real Worker smoke test.** `wrangler dev -c wrangler.local.jsonc` against the throwaway branch and live Drive, output from `scripts/worker_smoke.ts`:
+```
+POST /api/find, no session                                 401
+GET /api/auth/login (no OAuth client yet, R2)              503 OAuth client not configured (R2)
+GET / localhost, no session                                200 (sign-in page)
+POST /api/find as non-allowlisted allegiscapital.com       403
+POST /api/review/confirm, no Origin                        403 {"error":"forbidden","reason":"bad_origin"}
+POST /api/review/confirm, Origin=https://evil.allegis.app  403 {"error":"forbidden","reason":"bad_origin"}
+POST /api/review/confirm, text/plain body                  403 {"error":"forbidden","reason":"bad_content_type"}
+GET / signed in                                            200 (Find shell; Gaps tab disabled: not built (R-006))
+GET /api/facets                                            200 kinds=46 entities=35 portcos=1 tiers=[{"value":"normal","n":46259}]
+POST /api/find all labelled files, page 1                  200 total=46259 pageRows=50 shown=50 notShown={"noAccess":0,"checkFailed":0,"total":0} changedInDrive=0 groups=0 3956ms
+POST /api/find kind=k1, entity filter, group by fiscal year 200 total=32 pageRows=32 shown=32 notShown={"noAccess":0,"checkFailed":0,"total":0} changedInDrive=0 groups=2 3856ms
+POST /api/find fully executed + primary only, page 2       200 total=499 pageRows=50 shown=50 notShown={"noAccess":0,"checkFailed":0,"total":0} changedInDrive=0 groups=0 1487ms
+POST /api/find with injection attempt                      400 {"error":"bad_spec","reason":"kind: bad value"}
+POST /api/export kind=k1                                   200 rows=7216 header=file_id,document_id,kind,entities,portcos,fiscal_year,period,stage,signed_date,tier,is_primary,web_view_link
+GET /api/views (seeds on first use)                        200 views=4 seeds=4
+  seed "ACCSO · subscription docs"                         200 total=14 shown=14 notShown={"noAccess":0,"checkFailed":0,"total":0}
+  seed "MTV-II · FY2025 close"                             200 total=2 shown=2 notShown={"noAccess":0,"checkFailed":0,"total":0}
+  seed "Unsigned side letters"                             200 total=25 shown=25 notShown={"noAccess":0,"checkFailed":0,"total":0}
+  seed "K-1s · tax year 2025"                              200 total=615 shown=50 notShown={"noAccess":0,"checkFailed":0,"total":0}
+GET /api/review                                            200 counts={"stage_unknown":342,"low_confidence_executed":329,"no_kind":18417,"open_total":19088,"reviewed_today":1,"reviewed_total":1} shown=50 notShown={"noAccess":0,"checkFailed":0,"total":0} first_reason=stage_unknown page=0 nextPage=1 canWrite=true
+POST /api/review/confirm with read-only session (no write) 409 {"error":"consent_required","login":"/api/auth/login?scope=write&next=/review"}
+POST /api/review/confirm for a file not in the queue       404 {"error":"not_in_queue"}
+```
+- **Counts differ by one from item 0.** On the branch, `low_confidence_executed` is 329 and the open total is 19,088, against 330 and 19,089 in item 0. The difference is the single G4 test `review_event` on the branch. Main has none.
+- **Seed rows deleted on the branch.** Before this run I deleted Ryan's old stand-in seed rows from the branch's `app.saved_view`, so the new seeds would insert.
+
+**Not changed (listed only):**
+- **C6:** export isn't live-checked per row (above).
+- **CISO note:** CSRF protection now depends on the Origin header, which browsers always send on POST and DELETE. The check doesn't apply to `/api/auth/logout`: it is POST-only, and the worst a forged request can do is sign Ryan out.
+
+### 3 · Ryan's steps after R1–R3 (PowerShell, in this order)
+
+Run everything in one PowerShell window, because step 3 reuses `$owner`, `$pw` and `$appUrl` from step 2. Nothing below prints a secret. `npx wrangler secret put` either prompts for the value (hidden) or reads it from the pipe.
+
+**Step 1 · R1: push to GitHub** (repo `ryparker24/allegis-catalog`, created empty)
+```powershell
+cd C:\DriveCatalog\app
+git remote add origin https://github.com/ryparker24/allegis-catalog.git
+git push -u origin main
+```
+
+**Step 2 · R4: migration and labelled-file load on MAIN**
+```powershell
+cd C:\DriveCatalog\app\db\migrations
+$owner = ((Get-Content C:\DriveCatalog\catalog_db_url.txt | Where-Object { $_ -match 'UNPOOLED' }) -replace '^[^=]+=','').Trim().Trim('"',"'")
+psql $owner -v ON_ERROR_STOP=1 -f 001_app_schema.sql
+$pw = python -c "import secrets;print(secrets.token_urlsafe(24))"
+psql $owner -v ON_ERROR_STOP=1 -v pw="$pw" -f 002_catalog_app_role.sql
+python ..\load_labelled.py --url-file C:\DriveCatalog\catalog_db_url.txt
+# expect: app.labelled_file: 46,259 IDs loaded; not in cat.file: 0; secret tier: 0
+$appUrl = $owner -replace '^(postgres(?:ql)?://)[^@]+@', ('${1}catalog_app:' + $pw + '@')
+```
+
+**Step 3 · Deploy, then set the Worker secrets.** Deploying first is safe: until `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` are set, the Worker refuses every request with 403. Deploying first also means `secret put` doesn't stop to ask whether to create the Worker.
+```powershell
+cd C:\DriveCatalog\app
+npx wrangler login                     # once per machine, as the Cloudflare account that owns allegis.app
+npm ci
+npm run deploy                         # opennextjs-cloudflare build + deploy; custom domain catalog.allegis.app
+
+# CATALOG_APP_DB_URL  <- step 2 ($appUrl: the catalog_app role on MAIN, unpooled endpoint, db "catalog")
+$appUrl | npx wrangler secret put CATALOG_APP_DB_URL
+
+# SESSION_SECRET      <- generated here, 48 random bytes; never stored anywhere else
+python -c "import secrets;print(secrets.token_urlsafe(48))" | npx wrangler secret put SESSION_SECRET
+
+# GOOGLE_CLIENT_ID    <- R2: Google Cloud console, project "GP Member Portal" > APIs & Services > Credentials >
+#                        the new OAuth 2.0 Web client > "Client ID"   (paste at the prompt)
+npx wrangler secret put GOOGLE_CLIENT_ID
+# GOOGLE_CLIENT_SECRET <- R2: same client > "Client secret"            (paste at the prompt)
+npx wrangler secret put GOOGLE_CLIENT_SECRET
+
+# CF_ACCESS_TEAM_DOMAIN <- R3: Cloudflare Zero Trust > Settings > Custom pages > "Team domain",
+#                          e.g. <team>.cloudflareaccess.com            (paste at the prompt)
+npx wrangler secret put CF_ACCESS_TEAM_DOMAIN
+# CF_ACCESS_AUD       <- R3: Zero Trust > Access > Applications > the catalog.allegis.app app > Overview >
+#                        "Application Audience (AUD) Tag"             (paste at the prompt)
+npx wrangler secret put CF_ACCESS_AUD
+
+npx wrangler secret list               # expect the six names above (values are never shown)
+Remove-Variable owner, pw, appUrl
+```
+- **No redeploy needed.** Each `secret put` makes a new Worker version live at once.
+- **Do not set `ACCESS_MODE`** on the deployed Worker. It exists for localhost only, and the check ignores it whenever the Access secrets are set.
+
+**Step 4 · Check it is live (in a browser)**
+1. Open `https://catalog.allegis.app`. Cloudflare Access should ask you to sign in first, then "Sign in with Google" appears. Sign in as `ryan@allegiscapital.com`.
+2. **Find** should show 46,259 labelled files and the four seed views in the sidebar: ACCSO · subscription docs, MTV-II · FY2025 close, Unsigned side letters, K-1s · tax year 2025.
+3. **Review** asks for label-write access the first time you confirm a row (the 409, then Google's consent screen).
+4. Take the screenshots the order asks for here. They show file names, so keep them out of the repo.
+
+**Step 5 · Clean up.** Delete the throwaway Neon branch `catwo01-test-throwaway` (`br-spring-frost-bdrt8htx`) on project `curly-sunset-06555843`: Neon console > Branches > the branch > Delete.
