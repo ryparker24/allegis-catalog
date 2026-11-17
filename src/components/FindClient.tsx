@@ -62,6 +62,7 @@ export function FindClient() {
   const delView = async (id: number) => { await api(`/api/views?id=${id}`, { method: "DELETE" }); setViews((await api<{ views: View[] }>("/api/views")).views); };
   const exportCsv = async () => {
     const r = await fetch("/api/export", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(spec) });
+    if (r.status === 401) { window.location.href = `/api/auth/login?next=${encodeURIComponent(window.location.pathname)}`; return; }
     if (!r.ok) { setErr(`export failed (${r.status})`); return; }
     const url = URL.createObjectURL(await r.blob());
     const a = document.createElement("a"); a.href = url; a.download = `catalog-export-${new Date().toISOString().slice(0, 10)}.csv`; a.click();

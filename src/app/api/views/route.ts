@@ -5,6 +5,8 @@ import { COLUMNS, parseSpec, SEED_VIEWS, SpecError } from "@/lib/find";
 
 export const dynamic = "force-dynamic";
 
+const DISPLAY_ONLY = ["name", "executed_date", "review_status"]; // shown in the grid, not filter/sort columns
+
 /** GET: the user's saved views (the four design seeds are inserted on first use). */
 export async function GET(req: Request) {
   const env = await getEnv();
@@ -36,7 +38,7 @@ export async function POST(req: Request) {
   } catch (e) {
     return json({ error: "bad_spec", reason: e instanceof SpecError ? e.message : "invalid" }, 400);
   }
-  const columns = Array.isArray(body.spec?.columns) ? (body.spec!.columns as unknown[]).map(String).filter((c) => c in COLUMNS || c === "name") : undefined;
+  const columns = Array.isArray(body.spec?.columns) ? (body.spec!.columns as unknown[]).map(String).filter((c) => c in COLUMNS || DISPLAY_ONLY.includes(c)) : undefined;
   const stored = { ...spec, page: 0, columns };
   await db(env).exec(
     `INSERT INTO app.saved_view (owner_email, name, spec, sort) VALUES ($1, $2, $3::jsonb, 100)

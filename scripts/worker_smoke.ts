@@ -11,6 +11,8 @@ import { sealSession, SESSION_COOKIE } from "../src/lib/session";
 
 const arg = (k: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : undefined; };
 const base = arg("--base") ?? "http://127.0.0.1:8787";
+const ORIGIN = arg("--origin") ?? "http://localhost:8787"; // = APP_ORIGIN in wrangler.local.jsonc
+const J = { origin: ORIGIN, "content-type": "application/json" };
 const secret = readFileSync(arg("--secret-file")!, "utf8").trim();
 const tok = JSON.parse(readFileSync(arg("--token")!, "utf8"));
 
@@ -24,7 +26,7 @@ const line = (label: string, v: unknown) => console.log(`${label.padEnd(58)} ${t
 
 (async () => {
   // unauthenticated / wrong host
-  let r = await fetch(`${base}/api/find`, { method: "POST", body: "{}" });
+  let r = await fetch(`${base}/api/find`, { method: "POST", headers: J, body: "{}" });
   line("POST /api/find, no session", r.status);
   r = await fetch(`${base}/api/auth/login`, { redirect: "manual" });
   line("GET /api/auth/login (no OAuth client yet, R2)", `${r.status} ${(await r.text()).slice(0, 40)}`);
@@ -34,11 +36,20 @@ const line = (label: string, v: unknown) => console.log(`${label.padEnd(58)} ${t
   const t = await accessToken();
   const mk = async (email: string) => sealSession({ v: 1, email, sub: "smoke", hd: "allegiscapital.com", at: t.access_token, scopes: t.scope.split(" "), exp: Math.floor(Date.now() / 1000) + t.expires_in - 60 }, secret);
   const other = await mk("colleague@allegiscapital.com");
-  r = await fetch(`${base}/api/find`, { method: "POST", headers: { cookie: `${SESSION_COOKIE}=${other}` }, body: "{}" });
+  r = await fetch(`${base}/api/find`, { method: "POST", headers: { ...J, cookie: `${SESSION_COOKIE}=${other}` }, body: "{}" });
   line("POST /api/find as non-allowlisted allegiscapital.com", r.status);
 
   const c = `${SESSION_COOKIE}=${await mk("ryan@allegiscapital.com")}`;
-  const H = { cookie: c, "content-type": "application/json" };
+  const H = { ...J, cookie: c };
+  // CSRF (review fix): signed in, but no Origin / a sibling-subdomain Origin / a text/plain form body
+  for (const [label, hdr] of [
+    ["POST /api/review/confirm, no Origin", { cookie: c, "content-type": "application/json" }],
+    ["POST /api/review/confirm, Origin=https://evil.allegis.app", { cookie: c, "content-type": "application/json", origin: "https://evil.allegis.app" }],
+    ["POST /api/review/confirm, text/plain body", { cookie: c, "content-type": "text/plain", origin: ORIGIN }],
+  ] as const) {
+    r = await fetch(`${base}/api/review/confirm`, { method: "POST", headers: hdr, body: JSON.stringify({ file_id: "1111111111111111111111111", status: "confirmed" }) });
+    line(label, `${r.status} ${JSON.stringify(await r.json())}`);
+  }
   r = await fetch(`${base}/`, { headers: { cookie: c } });
   const html = await r.text();
   line("GET / signed in", `${r.status} ${/Saved views|class="find/.test(html) && /not built \(R-006\)/.test(html) && !/403 - not allowed|Sign in with Google/.test(html) ? "(Find shell; Gaps tab disabled: not built (R-006))" : "(NOT the Find shell)"}`);
@@ -67,13 +78,18 @@ const line = (label: string, v: unknown) => console.log(`${label.padEnd(58)} ${t
   r = await fetch(`${base}/api/views`, { headers: H });
   const v = await r.json() as any;
   line("GET /api/views (seeds on first use)", `${r.status} views=${v.views?.length} seeds=${v.views?.filter((x: any) => x.is_seed).length}`);
+  for (const sv of (v.views ?? []).filter((x: any) => x.is_seed)) {
+    r = await fetch(`${base}/api/find`, { method: "POST", headers: H, body: JSON.stringify({ ...sv.spec, page: 0 }) });
+    const j = await r.json() as any;
+    line(`  seed "${sv.name}"`, `${r.status} total=${j.total} shown=${j.rows?.length} notShown=${JSON.stringify(j.notShown)}`);
+  }
 
   r = await fetch(`${base}/api/review`, { headers: H });
   const q = await r.json() as any;
-  line("GET /api/review", `${r.status} counts=${JSON.stringify(q.counts)} shown=${q.rows?.length} notShown=${JSON.stringify(q.notShown)} first_reason=${q.rows?.[0]?.queue_reason} canWrite=${q.canWrite}`);
+  line("GET /api/review", `${r.status} counts=${JSON.stringify(q.counts)} shown=${q.rows?.length} notShown=${JSON.stringify(q.notShown)} first_reason=${q.rows?.[0]?.queue_reason} page=${q.page} nextPage=${q.nextPage} canWrite=${q.canWrite}`);
 
   const ro = await sealSession({ v: 1, email: "ryan@allegiscapital.com", sub: "smoke", hd: "allegiscapital.com", at: t.access_token, scopes: ["openid", "email", "https://www.googleapis.com/auth/drive.metadata.readonly"], exp: Math.floor(Date.now() / 1000) + 600 }, secret);
-  r = await fetch(`${base}/api/review/confirm`, { method: "POST", headers: { cookie: `${SESSION_COOKIE}=${ro}`, "content-type": "application/json" }, body: JSON.stringify({ file_id: q.rows?.[0]?.file_id, status: "confirmed" }) });
+  r = await fetch(`${base}/api/review/confirm`, { method: "POST", headers: { ...J, cookie: `${SESSION_COOKIE}=${ro}` }, body: JSON.stringify({ file_id: q.rows?.[0]?.file_id, status: "confirmed" }) });
   line("POST /api/review/confirm with read-only session (no write)", `${r.status} ${JSON.stringify(await r.json())}`);
   r = await fetch(`${base}/api/review/confirm`, { method: "POST", headers: H, body: JSON.stringify({ file_id: "1111111111111111111111111", status: "confirmed" }) });
   line("POST /api/review/confirm for a file not in the queue", `${r.status} ${JSON.stringify(await r.json())}`);

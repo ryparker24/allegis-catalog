@@ -5,7 +5,7 @@ import { SidePanel } from "./SidePanel";
 import { VOCAB } from "@/lib/vocab";
 
 type Counts = { stage_unknown?: number; low_confidence_executed?: number; no_kind?: number; open_total?: number; reviewed_today?: number; reviewed_total?: number };
-type Resp = { counts: Counts; page: number; pageRows: number; rows: Row[]; notShown: NotShown; canWrite: boolean };
+type Resp = { counts: Counts; page: number; nextPage: number | null; pageRows: number; rows: Row[]; notShown: NotShown; canWrite: boolean };
 
 const REASON: Record<string, string> = { stage_unknown: "Stage unknown", low_confidence_executed: "Fully executed (low confidence)", no_kind: "No kind" };
 const SIGNAL: Record<string, string> = {
@@ -15,6 +15,7 @@ const SIGNAL: Record<string, string> = {
 };
 const STAGES = ["draft", "final_unexecuted", "partially_executed", "fully_executed", "n_a"] as const;
 const SKIP_KEY = "catalog.review.skipped";
+const SKIP_MAX = 400; // the server reads at most 500; keeps the query string well under URL limits
 
 function why(r: Row): string {
   const parts = [REASON[r.queue_reason ?? ""] ?? r.queue_reason ?? ""];
@@ -37,8 +38,8 @@ export function ReviewClient() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const load = useCallback(async (skip: string[]) => {
-    const r = await api<Resp>(`/api/review?skip=${encodeURIComponent(skip.join(","))}`);
+  const load = useCallback(async (skip: string[], page = 0) => {
+    const r = await api<Resp>(`/api/review?page=${page}&skip=${encodeURIComponent(skip.join(","))}`);
     setData(r);
     setCur(r.rows[0] ?? null);
   }, []);
@@ -55,11 +56,11 @@ export function ReviewClient() {
   };
   const skip = () => {
     if (!cur || !data) return;
-    const s = [...skipped, cur.file_id];
+    const s = [...skipped, cur.file_id].slice(-SKIP_MAX);
     setSkipped(s);
     try { sessionStorage.setItem(SKIP_KEY, JSON.stringify(s)); } catch { /* storage unavailable: skip for this view only */ }
     const n = next(data.rows, cur.file_id);
-    if (n) setCur(n); else load(s);
+    if (n) setCur(n); else load(s, data.page).catch((e) => setMsg(e.message));
   };
   const confirm = async () => {
     if (!cur) return;
@@ -67,7 +68,7 @@ export function ReviewClient() {
     try {
       await api("/api/review/confirm", { method: "POST", body: JSON.stringify({ file_id: cur.file_id, ...form, stage: form.stage || null, executed_date: form.executed_date || null, note: form.note || null }) });
       setMsg("Saved to Drive.");
-      await load(skipped);
+      await load(skipped, data?.page ?? 0);
     } catch (e) {
       const b = (e as { body?: { error?: string; reason?: string; drive_status?: number } }).body;
       setMsg(`Not saved: ${b?.reason ?? b?.error ?? (e as Error).message}${b?.drive_status ? ` (Drive ${b.drive_status})` : ""}`);
@@ -135,7 +136,7 @@ export function ReviewClient() {
               {msg ? <p className="status">{msg}</p> : null}
             </form>
           </SidePanel>
-        ) : data && !data.rows.length ? <p className="center muted">Queue is empty on this page.</p> : null}
+        ) : data && !data.rows.length ? <p className="center muted">Nothing shown on this page.{data.nextPage != null ? <> <button onClick={() => load(skipped, data.nextPage!).catch((e) => setMsg(e.message))}>Next page</button></> : null}</p> : null}
       </div>
     </div>
   );

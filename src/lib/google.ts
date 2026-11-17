@@ -98,7 +98,9 @@ export async function driveBatchGet(accessToken: string, ids: string[], opts: { 
     body: parts.join("") + `--${boundary}--\r\n`,
   });
   if (!r.ok) {
-    for (const id of valid) out.set(id, { status: r.status, body: null });
+    // Batch-level failure: nothing was checked. 401 stays 401 (session expired); anything else is "check failed",
+    // never "no access".
+    for (const id of valid) out.set(id, { status: r.status === 401 ? 401 : 0, body: null });
     return out;
   }
   const parsed = parseBatchResponse(r.headers.get("content-type") ?? "", await r.text());
@@ -153,7 +155,7 @@ export function isTransient(item: BatchItem): boolean {
   if (item.status === 0 || item.status === 429 || item.status >= 500) return true;
   if (item.status === 403) {
     const reason = ((item.body?.error as { errors?: { reason?: string }[] } | undefined)?.errors?.[0]?.reason ?? "").toLowerCase();
-    return /ratelimit|quota|backenderror/.test(reason);
+    return /ratelimit|limitexceeded|quota|backenderror/.test(reason);
   }
   return false;
 }
