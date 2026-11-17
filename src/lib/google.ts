@@ -159,3 +159,33 @@ export function isTransient(item: BatchItem): boolean {
   }
   return false;
 }
+
+// ------------------------------------------------------------------ Drive name search (CAT-WO-02 item 1, top-bar search)
+export const NAME_SEARCH_CAP = 2000;
+/** Drive query literal: backslash and single quote escaped, per the Drive search-query grammar. */
+export function driveQueryLiteral(s: string): string {
+  return `'${s.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+/**
+ * File IDs whose NAME contains the term, by a Drive files.list as the signed-in user: Google enforces access, and no
+ * file name ever reaches the catalog DB or the logs. IDs only, capped at NAME_SEARCH_CAP.
+ */
+export async function driveNameSearch(accessToken: string, term: string, f: FetchLike = gfetch): Promise<{ ids: string[]; capped: boolean; status: number }> {
+  const ids: string[] = [];
+  let pageToken = "";
+  for (let i = 0; i < 2; i++) {
+    const q = new URLSearchParams({
+      q: `name contains ${driveQueryLiteral(term)} and trashed = false`,
+      corpora: "allDrives", includeItemsFromAllDrives: "true", supportsAllDrives: "true",
+      fields: "nextPageToken,files(id)", pageSize: "1000",
+    });
+    if (pageToken) q.set("pageToken", pageToken);
+    const r = await f(`https://www.googleapis.com/drive/v3/files?${q}`, { headers: { authorization: `Bearer ${accessToken}` } });
+    if (!r.ok) return { ids, capped: false, status: r.status };
+    const j = (await r.json()) as { files?: { id?: string }[]; nextPageToken?: string };
+    for (const x of j.files ?? []) if (x.id && FILE_ID_RE.test(x.id)) ids.push(x.id);
+    pageToken = j.nextPageToken ?? "";
+    if (!pageToken) return { ids, capped: false, status: 200 };
+  }
+  return { ids: ids.slice(0, NAME_SEARCH_CAP), capped: true, status: 200 };
+}

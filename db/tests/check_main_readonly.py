@@ -78,6 +78,9 @@ rels = owner.execute("""SELECT n.nspname, c.relname, c.relkind FROM pg_class c J
                         WHERE n.nspname IN ('cat','ref','ops','app') AND c.relkind IN ('r','v','m','p','f') ORDER BY 1,2""").fetchall()
 allowed = {("app", v): {"SELECT"} for v in APP_VIEWS}
 allowed[("app", "saved_view")] = {"SELECT", "INSERT", "UPDATE", "DELETE"}
+# CAT-WO-02 Part 1 (003): owner-scoped folders and last-state prefs
+allowed[("app", "view_folder")] = {"SELECT", "INSERT", "UPDATE", "DELETE"}
+allowed[("app", "user_pref")] = {"SELECT", "INSERT", "UPDATE", "DELETE"}
 allowed[("app", "review_event")] = {"INSERT"}
 bad = []
 for sch, rel, _k in rels:

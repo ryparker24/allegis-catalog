@@ -7,9 +7,9 @@ import { nowS, type Session } from "@/lib/session";
 
 describe("Find SQL builder", () => {
   it("filters become bind parameters, never SQL text", () => {
-    const q = pageQuery({ filters: { kind: ["k1", "(none)"], entity: ["NL-I"], fiscal_year: [2024], primary_only: true }, sort: { col: "fiscal_year", dir: "desc" }, page: 2 });
+    const q = pageQuery({ filters: { kind: ["k1", "(none)"], entity: ["NL-I"], fiscal_year: [2024], primary_only: true }, sort: { col: "fiscal_year", dir: "desc" }, page: 2, pageSize: 100 });
     expect(q.sql).toContain("FROM app.v_find");
-    expect(q.sql).toContain("LIMIT 50 OFFSET 100");
+    expect(q.sql).toContain("LIMIT 100 OFFSET 200");
     expect(q.sql).not.toContain("k1");
     expect(q.params).toEqual([["k1"], ["NL-I"], [2024]]);
   });

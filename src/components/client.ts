@@ -46,7 +46,7 @@ export interface Row {
 }
 export interface NotShown { noAccess: number; checkFailed: number; total: number }
 
-const LIST_OF: Record<string, VocabList | undefined> = { kind: "kind", period: "period", stage: "stage", tier: "tier", workstream: "workstream", issuer: "issuer" };
+const LIST_OF: Record<string, VocabList | undefined> = { kind: "kind", period: "period", stage: "stage", tier: "tier", workstream: "workstream", issuer: "issuer", review: "review", review_status: "review" };
 export function show(col: string, v: unknown): string {
   if (v == null || v === "") return "";
   if (Array.isArray(v)) return v.join(", ");

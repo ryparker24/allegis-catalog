@@ -5,7 +5,7 @@
 const ALLOWED_KEYS = new Set([
   "event", "file_id", "file_ids", "document_id", "status", "stage", "queue_reason", "labels", "count", "total",
   "dropped_no_access", "dropped_check_failed", "dropped_secret", "page", "page_size", "ms", "http_status",
-  "drive_status", "reason", "route", "has_session", "can_write", "outcome",
+  "drive_status", "reason", "route", "has_session", "can_write", "outcome", "format",
 ]);
 // Per-key shapes (CISO review): ID keys take Drive/DB IDs only (no dots, spaces or slashes, so "x.pdf" and
 // "Some Name" fail); every other string key takes a lowercase snake_case code only.
