@@ -1,0 +1,13 @@
+{
+  // LOCAL SMOKE TESTS ONLY (Ryan's machine): same Worker bundle, NO route, so requests stay on localhost and
+  // ACCESS_MODE=local-dev from .dev.vars can apply. Never deploy with this file.
+  //   npx opennextjs-cloudflare build && npx wrangler dev -c wrangler.local.jsonc --port 8787
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "allegis-catalog-local",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "workers_dev": false,
+  "vars": { "APP_ORIGIN": "http://localhost:8787", "ALLOWED_HD": "allegiscapital.com", "ALLOWLIST": "ryan@allegiscapital.com" }
+}

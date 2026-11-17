@@ -1,0 +1,50 @@
+# --- Local-only files of the Drive Catalog project (CAT-WO-01: never committed) ---
+client_secret.json
+client_secret*.json
+token_*.json
+catalog_db_url.txt
+*db_url*.txt
+branch_url.txt
+listing_cache.json.gz
+*.json.gz
+labels_done.txt
+labels_*log*.csv
+labels_bulk_log.csv
+labels_sync_log.csv
+unlabelled_*.csv
+drive_census_*.csv
+Allegis_Catalog_Alias_Map_*.xlsx
+*.xlsx
+*.csv
+!test/fixtures/*.csv
+
+# --- Secrets / env ---
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*.pem
+*.key
+
+# --- Build / deps ---
+node_modules/
+.next/
+.open-next/
+.wrangler/
+out/
+dist/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+__pycache__/
+*.pyc
+
+# --- Screenshots / handoff artefacts that may show file names ---
+screenshots/
+*.png
+!public/*.png
+
+.DS_Store
+Thumbs.db

@@ -1,0 +1,10 @@
+# Copy to .dev.vars (git-ignored) for `npm run dev`. Never commit real values.
+APP_ORIGIN=http://localhost:3000
+ALLOWED_HD=allegiscapital.com
+ALLOWLIST=ryan@allegiscapital.com
+GOOGLE_CLIENT_ID=            # R2
+GOOGLE_CLIENT_SECRET=        # R2
+SESSION_SECRET=              # node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+CATALOG_APP_DB_URL=          # catalog_app role on a THROWAWAY BRANCH for local dev
+# Local dev only: skips the Cloudflare Access JWT check, and only for requests to localhost/127.0.0.1.
+ACCESS_MODE=local-dev

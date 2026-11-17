@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "allegis-catalog",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "observability": { "enabled": true },
+  "workers_dev": false,
+  "preview_urls": false,
+  // R3: catalog.allegis.app must exist in Cloudflare DNS and sit behind a Cloudflare Access application
+  // (policy: Ryan's address only) BEFORE the first deploy. The Worker refuses every request without a valid
+  // Access JWT (CF_ACCESS_TEAM_DOMAIN + CF_ACCESS_AUD), so deploying early fails closed.
+  "routes": [{ "pattern": "catalog.allegis.app", "custom_domain": true }],
+  // NO KV, R2, D1 or Durable Object bindings: nothing (and no token) is persisted by the Worker.
+  "vars": {
+    "APP_ORIGIN": "https://catalog.allegis.app",
+    "ALLOWED_HD": "allegiscapital.com",
+    "ALLOWLIST": "ryan@allegiscapital.com"
+  }
+  // Secrets (wrangler secret put <NAME>), never in this file or in chat:
+  //   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET   (R2: OAuth Web client, project "GP Member Portal")
+  //   SESSION_SECRET                           (32+ random bytes, base64)
+  //   CATALOG_APP_DB_URL                       (catalog_app role, unpooled, db "catalog")
+  //   CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD     (R3: Access team domain + application AUD tag)
+}
