@@ -261,8 +261,51 @@ Both reviews ran read-only on `f408e52..cat-wo-02-p2`. Each finding and its fix 
   - A person's *blank* is kept on the label and protected from the re-sync. The catalog still shows the rule value until a reviewer sets a value, because `*_confirmed` NULL falls back to auto.
   - Period `month` / `as_of` / `n_a` has no catalog column, so it is kept on the label only.
 
+### Ruled (Ryan, 2026-11-17)
+- **Item 9 re-kind rules** (implemented on the throwaway branch only; the two new kinds publish with Part 2):
+  - **RK1:** approved. It runs before NK07.
+  - **RK2:** approved with changes. Amendments and restatements → `operating_agreement_amendment` (Datum FORM-05); the rest → `operating_agreement` (FORM-04). The 11 correspondence files are excluded.
+  - **RK3:** approved as kind `template`. No new Status choice.
+  - **RK4:** approved.
+  - **Superseded:** the CAT-WO-03 prep's suggested FORM-04/05 → `lpa` / `legal_agreement` mapping. FORM-04 → `operating_agreement` and FORM-05 → `operating_agreement_amendment` from now on.
+- **Fiscal-year folder rules and the `v_file_best` tie-break** (from CAT-WO-03 prep `eda7a0e`, approved). Both are in `004_wo02_part2.sql` and release with Part 2's derive + re-sync.
+  - **Rule numbering:** `PER-009` year **before** Tax / Taxes / Tax Return(s) / Audit / K-1; **`PER-014`** year **after** them.
+    - The prep file named the second rule `PER-010`, but `PER-010` v1 already exists on main as a `fiscal_quarter` rule, and the prep's insert uses `ON CONFLICT DO NOTHING`. So it is `PER-014` here, with a guard that refuses to run if either id belongs to a different rule.
+  - **Tie-break:** `cat.v_file_best` ORDER BY gains `s.rule_id, s.value`.
+  - **Measured on the branch** (fiscal-year winners snapshotted, 004 applied, then `drive_crawl.derive()` run against the branch, 192 s):
+    - **775** catalog files change fiscal year: 586 had none and get one; 189 move to the nearer folder's year. **212** of them are K-1s.
+    - **0** files move into or out of FY2022.
+    - Rules deciding the changed files: PER-009 436, PER-014 338, PER-004 1.
+    - Two consecutive reads of `v_file_best` are now **identical** (before the fix, the same diff gave 774 / 775 / 776).
+    - Labelled files (as Find shows them): **386** change fiscal year.
+    - Part 2's Status (7,252) and Parties (3,385) values are intact after the derive.
+
 ### For Ryan to rule on (nothing below is applied)
-**Item 9 · proposed no-kind rules** (F-018). 18,417 no-kind labelled files. First match wins, in this order. Counts are the files each rule would set.
+**T1 · a side effect of the approved tie-break (rule before the Part 2 re-sync).**
+- **What happens:** with a deterministic winner, **438 labelled files change kind**. 427 of them had two different kinds tied at the top, so until now their kind was effectively a coin-flip between runs.
+- **The main tie (417 files):** **KND-024** (`tax_return`: 1065 / 1120 / 990 / 568 / 565 / 1040 / "tax return") against **KND-041** (`tax_form`: state forms, e.g. "CA 568", "NY 1065", "IT-204", "FTB 3537"). Both are priority 25, so a name like "CA 568" matches both.
+- **Transitions:** tax_form → tax_return 225 · tax_return → tax_form 203.
+- **The other ties (10 files):** KND-044 workpaper vs KNX-006 financial_statements (6), KND-007 lpa vs KNX-002 ppm (2), KND-011 vs KND-012 (1), KND-019 vs KND-022 (1).
+- **The ruling needed:** is a state partnership return (CA 568, NY IT-204, NJ-1065) a `tax_return` or a `tax_form`?
+  - Then give that rule priority 24, so the answer comes from the ruling and not from the rule-id order.
+  - Until ruled, the re-sync would push these kind changes to Drive, so this should be ruled before the Part 2 release.
+
+**K-1 kind rules for the no-kind K-1-looking files (the FY2023 gap from CAT-WO-03 prep)** (`scripts/measure_wo02_item9c.py`; the whole live catalog, labelled or not, after the branch derive; counts only).
+- FY2023 has **1,039** K-1-looking files (named K-1, or in a K-1 folder); **732** have no kind (the prep counted ~733).
+
+| Rule (proposed) | What it reads | FY2023 | All years | Labelled / unlabelled |
+|---|---|---:|---:|---|
+| **K1N** | "K-1" / "K1" / "K-1s" / "Schedule K-1" in the name (not "K-1065"-style numbers), no kind → `k1` | 5 | 451 | 227 / 224 |
+| **K1F** | a K-1 folder ("2023 K-1s", "K-1s from PwC", "Final K-1s") **and** a PDF / doc / image file, no kind → `k1` | 727 | 6,534 | 3,126 / 3,408 |
+| *(not proposed)* | the same folders, but spreadsheets / archives / email (likely allocations or workpapers) | 0 | 138 | 48 / 90 |
+
+- **Kind before → after:** (none) → `k1` on **732** FY2023 files (0 left without a kind) and **6,985** files across all years.
+- **For the ruling:**
+  - K1F supersedes NK01 if both are approved. It is stricter, because it skips spreadsheets and archives.
+  - K-1 folders also hold cover letters: 117 files there are already `correspondence`. That is why the rule touches only files with no kind.
+
+**Item 9 · proposed no-kind rules** *(NK01–NK12, below; not yet ruled)*
+18,417 no-kind labelled files. First match wins, in this order. Counts are the files each rule would set.
 
 | Rule | Sets kind | Would set | What it reads |
 |---|---|---:|---|
