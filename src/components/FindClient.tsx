@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, show, type NotShown, type Row } from "./client";
 import { SidePanel } from "./SidePanel";
+import { BulkEditDialog, EditForm, editInfo, type FieldInfo } from "./EditForm";
 import { PageHeader } from "./AppShell";
 import { useOutside } from "./ViewTree";
 import { emit, EV, on, shownName, type ViewRef } from "./bus";
@@ -179,12 +180,15 @@ export function FindClient() {
   const [dragCol, setDragCol] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
   const reqId = useRef(0);
+  const [bulkFields, setBulkFields] = useState<FieldInfo[]>([]);
+  const [bulk, setBulk] = useState<FieldInfo | null>(null);
   const userActed = useRef(false); // a rail click or a search before the start-up load finished wins (coder review #7)
   const closePop = useCallback(() => setPop(null), []);
 
   // ---------------------------------------------------------------- start: URL (?view= / ?q=), else the last state
   useEffect(() => {
     api<Facets>("/api/facets").then(setFacets).catch((e) => setErr((e as Error).message));
+    editInfo().then((r) => setBulkFields(r.fields.filter((f) => f.bulk))).catch(() => {});
     (async () => {
       const u = new URLSearchParams(window.location.search);
       const viewId = Number(u.get("view"));
@@ -539,7 +543,13 @@ export function FindClient() {
                 Actions{checked.size ? ` (${checked.size})` : ""} <Icon name="chevDown" />
               </button>
               <Pop open={pop === "actions"} onClose={closePop} className="menu left">
-                <div className="hint">Bulk edits (set kind, entity, fiscal year, status…) arrive with CAT-WO-02 Part 2. Nothing here writes yet.</div>
+                {bulkFields.map((f) => (
+                  <button key={f.key} disabled={!f.published} onClick={() => { setPop(null); setBulk(f); }} title={f.published ? undefined : "Not published on Drive yet"}>
+                    Set {f.title.toLowerCase()}…{f.published ? "" : " (not published yet)"}
+                  </button>
+                ))}
+                <div className="sep" />
+                <div className="hint">Writes the label on each selected file as you (500 at most), after a preview. Handling is never editable.</div>
               </Pop>
             </div>
             <span>{checked.size ? `${checked.size} of ${pageIds.length} on this page selected` : pageIds.length ? `Select files on this page (${pageIds.length})` : ""}</span>
@@ -641,7 +651,16 @@ export function FindClient() {
           {pager}
         </section>
 
-        {open ? <SidePanel row={open} onClose={() => setOpen(null)} /> : null}
+        {open ? (
+          <SidePanel row={open} onClose={() => setOpen(null)}>
+            <EditForm row={open} onSaved={(patch) => {
+              const upd = { ...open, ...patch } as Row;
+              setOpen(upd);
+              setRes((r) => (r ? { ...r, rows: r.rows.map((x) => (x.file_id === upd.file_id ? upd : x)) } : r));
+            }} />
+          </SidePanel>
+        ) : null}
+        {bulk ? <BulkEditDialog field={bulk} ids={[...checked]} onClose={() => setBulk(null)} onDone={() => run(spec)} /> : null}
       </div>
     </div>
   );

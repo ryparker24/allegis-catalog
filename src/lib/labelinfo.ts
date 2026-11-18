@@ -11,7 +11,7 @@ type LabelDef = { label_id: string; title: string; fields: Record<string, FieldD
 const S = schema as unknown as Record<string, LabelDef>;
 
 /** Who sets a field. "review" = the Review queue writes it today; "part2" = machine-set until CAT-WO-02 Part 2 (R-023) makes it app-editable; "machine" = catalog rules / labelling run only; "never" = Handling. */
-export type Editable = "review" | "machine" | "never" | "part2";
+export type Editable = "review" | "machine" | "never" | "part2" | "app";
 interface FieldMeta { title: string; about: string; editable: Editable; vocab?: VocabList | "entity" | "portco" }
 
 export const LABEL_ABOUT: Record<string, string> = {
@@ -19,6 +19,7 @@ export const LABEL_ABOUT: Record<string, string> = {
   exec: "Signing progress for documents that need signatures.",
   handling: "How carefully the file must be handled. Read-only in the app.",
   review: "Whether a person has checked the catalog's values.",
+  parties: "Who issued the document and who received it (R-021). Codes only: never an LP or individual name.",
 };
 
 export const FIELD_META: Record<string, Record<string, FieldMeta>> = {
@@ -54,15 +55,19 @@ const TYPE_WORDS: Record<string, string> = {
 };
 
 export interface PanelChoice { code: string; meaning: string }
-export interface PanelField { key: string; title: string; about: string; type: string; multi: boolean; editable: Editable; choices: PanelChoice[] }
-export interface PanelLabel { key: string; title: string; about: string; fields: PanelField[] }
+export interface PanelField { key: string; title: string; about: string; type: string; multi: boolean; editable: Editable; choices: PanelChoice[]; planned?: boolean }
+export interface PanelLabel { key: string; title: string; about: string; fields: PanelField[]; planned?: boolean }
+
+/** Part 2 (R-023): these are edited in the app (Find side panel, bulk, Review form). */
+const APP_EDITABLE = new Set(["doc.kind", "doc.entity", "doc.portco", "doc.fiscal_year", "doc.period", "doc.effective_date",
+  "exec.stage", "exec.executed_date", "exec.status", "exec.issued_date", "parties.issuing_entity", "parties.receiving_entities"]);
 
 const MULTI = new Set(["doc.entity", "doc.portco", "handling.contains"]);
 
 export function buildLabelsPanel(names: { entity: Map<string, string>; portco: Map<string, string> }): PanelLabel[] {
-  return Object.entries(S).map(([lk, L]) => ({
+  const published: PanelLabel[] = Object.entries(S).map(([lk, L]) => ({
     key: lk,
-    title: L.title,
+    title: lk === "exec" && !L.fields.status ? `${L.title} (to be renamed Status & Execution)` : L.title,
     about: LABEL_ABOUT[lk] ?? "",
     fields: Object.entries(L.fields).map(([fk, F]) => {
       const m = FIELD_META[lk]?.[fk] ?? { title: fk, about: "", editable: "machine" as Editable };
@@ -72,9 +77,33 @@ export function buildLabelsPanel(names: { entity: Map<string, string>; portco: M
         : m.vocab === "portco" ? names.portco.get(code) ?? code
         : m.vocab ? ((VOCAB[m.vocab] as Record<string, string>)[code] ?? code) : code;
       return {
-        key: fk, title: m.title, about: m.about, type: TYPE_WORDS[F.type] ?? F.type, multi: MULTI.has(`${lk}.${fk}`), editable: m.editable,
+        key: fk, title: m.title, about: m.about, type: TYPE_WORDS[F.type] ?? F.type, multi: MULTI.has(`${lk}.${fk}`),
+        editable: APP_EDITABLE.has(`${lk}.${fk}`) ? "app" : m.editable === "part2" ? "machine" : m.editable,
         choices: codes.map((code) => ({ code, meaning: meaning(code) })),
       };
     }),
   }));
+  // Planned (R-021 / R-022), shown until published on Drive: nothing is editable before that.
+  const ents = [...names.entity.entries()].map(([code, meaning]) => ({ code, meaning }));
+  const pcos = [...names.portco.entries()].map(([code, meaning]) => ({ code, meaning: `${meaning} (portfolio company)` }));
+  const exec = published.find((l) => l.key === "exec");
+  if (exec && !S.exec.fields.status) {
+    exec.fields.push(
+      { key: "status", title: "Status", about: "Publishing progress for everything that isn't signed: financial statements, reports, letters, K-1s, PCAPs, workpapers. A fully executed agreement is Final.", type: "pick list", multi: false, editable: "app", planned: true,
+        choices: Object.entries(VOCAB.status).map(([code, meaning]) => ({ code, meaning })) },
+      { key: "issued_date", title: "Issued date", about: "The date the document was issued.", type: "date", multi: false, editable: "app", planned: true, choices: [] },
+    );
+  }
+  if (!S.parties) {
+    published.splice(2, 0, {
+      key: "parties", title: "Parties (L11)", about: LABEL_ABOUT.parties, planned: true,
+      fields: [
+        { key: "issuing_entity", title: "Issuing entity", about: "Who issued the document: an Allegis entity, a portfolio company, or EXTERNAL.", type: "pick list", multi: false, editable: "app", planned: true,
+          choices: [...ents, ...pcos, { code: "EXTERNAL", meaning: VOCAB.party_extra.EXTERNAL }] },
+        { key: "receiving_entities", title: "Receiving entity", about: "Who received it: Allegis entities, LP (an outside limited partner) or EXTERNAL.", type: "pick list", multi: true, editable: "app", planned: true,
+          choices: [...ents, { code: "LP", meaning: VOCAB.party_extra.LP }, { code: "EXTERNAL", meaning: VOCAB.party_extra.EXTERNAL }] },
+      ],
+    });
+  }
+  return published;
 }

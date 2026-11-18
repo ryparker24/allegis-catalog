@@ -132,3 +132,28 @@ export async function bulkWrite(accessToken: string, ids: string[], mods: unknow
   }
   return out;
 }
+
+// ------------------------------------------------------------------ what the edit form offers (GET /api/edit)
+import { VOCAB } from "./vocab";
+const TITLES: Record<EditField, string> = {
+  kind: "Kind", entities: "Entity", portcos: "Portco", fiscal_year: "Fiscal year", period: "Period", effective_date: "Effective date",
+  issuing_entity: "Issuing entity", receiving_entities: "Receiving entity", status: "Status", issued_date: "Issued date",
+  stage: "Signing stage", executed_date: "Executed date",
+};
+export interface EditFieldInfo { key: EditField; title: string; type: "one" | "many" | "int" | "date"; published: boolean; bulk: boolean; choices: { code: string; meaning: string }[] }
+export function editFields(names: { entity: Map<string, string>; portco: Map<string, string> }): EditFieldInfo[] {
+  return EDIT_FIELDS.map((f) => {
+    const [lk, fk, type] = MAP[f];
+    const published = hasField(lk, fk);
+    const ch = published ? Object.keys(labelOf(lk)!.fields[fk].choices ?? {}) : [];
+    const meaning = (c: string) =>
+      f === "entities" ? names.entity.get(c) ?? c
+      : f === "portcos" ? names.portco.get(c) ?? c
+      : f === "issuing_entity" || f === "receiving_entities" ? names.entity.get(c) ?? names.portco.get(c) ?? (VOCAB.party_extra as Record<string, string>)[c] ?? c
+      : f === "kind" ? (VOCAB.kind as Record<string, string>)[c] ?? c
+      : f === "period" ? (VOCAB.period as Record<string, string>)[c] ?? c
+      : f === "stage" ? (VOCAB.stage as Record<string, string>)[c] ?? c
+      : f === "status" ? (VOCAB.status as Record<string, string>)[c] ?? c : c;
+    return { key: f, title: TITLES[f], type, published, bulk: BULK_FIELDS.includes(f), choices: ch.map((c) => ({ code: c, meaning: meaning(c) })) };
+  });
+}

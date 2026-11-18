@@ -4,14 +4,15 @@ import { api } from "./client";
 import { Icon } from "./icons";
 
 type Choice = { code: string; meaning: string };
-type Field = { key: string; title: string; about: string; type: string; multi: boolean; editable: "review" | "machine" | "never" | "part2"; choices: Choice[] };
-type Label = { key: string; title: string; about: string; fields: Field[] };
+type Field = { key: string; title: string; about: string; type: string; multi: boolean; editable: "review" | "machine" | "never" | "part2" | "app"; choices: Choice[]; planned?: boolean };
+type Label = { key: string; title: string; about: string; fields: Field[]; planned?: boolean };
 
 const ED: Record<Field["editable"], [string, string, string]> = {
   review: ["ed-review", "Editable: Review queue", "The Review queue writes this field on the file, as you."],
   machine: ["ed-machine", "Machine-set", "Set by the catalog rules and the labelling run. Not editable in the app yet."],
   never: ["ed-never", "Read-only", "Never editable in the app."],
   part2: ["ed-part2", "Editable after Part 2", "Machine-set today. CAT-WO-02 Part 2 makes it editable in Find and Review (written on the file as you)."],
+  app: ["ed-review", "Editable in the app", "Edit it in Find's side panel, by bulk Actions, or in the Review form: written on the file as you, marked Confirmed."],
 };
 
 /** Item 3: the Labels side panel. Reads labels_schema.json + ref (via /api/labels); never edits. */
@@ -72,6 +73,7 @@ export function LabelsPanel({ onClose }: { onClose: () => void }) {
                     <Icon name="chevRight" className="chev" />
                     <span className="t">{f.title}</span>
                     <span className="ty">{f.type}{f.multi ? ", several allowed" : ""}{f.choices.length ? ` · ${f.choices.length} choice${f.choices.length === 1 ? "" : "s"}` : ""}</span>
+                    {f.planned ? <span className="ed-tag ed-part2" title="Built, but not yet published on Drive: not editable until it is.">Not published yet</span> : null}
                     <span className={`ed ed-tag ${ED[f.editable][0]}`} title={ED[f.editable][2]}>{ED[f.editable][1]}</span>
                   </summary>
                   <div className="about">{f.about}</div>
@@ -86,8 +88,8 @@ export function LabelsPanel({ onClose }: { onClose: () => void }) {
           ))}
           {labels ? (
             <p className="small muted">
-              Editable today: Signing stage and Executed date, plus the Catalog Review fields, through the Review queue. Part 2 of CAT-WO-02 makes Kind, Entity, Portco,
-              Fiscal year, Period and Effective date editable in Find and Review, and adds the Parties label and a Status field. Handling stays read-only.
+              Editable in the app: Kind, Entity, Portco, Fiscal year, Period, Effective date, Signing stage and Executed date, and (once published) Issuing and Receiving
+              entity, Status and Issued date. Saving marks the file Confirmed. Workstream, Issuer type and Catalog ID stay machine-set; Handling stays read-only.
             </p>
           ) : null}
         </div>
