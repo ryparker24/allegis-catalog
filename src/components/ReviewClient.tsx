@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, show, type NotShown, type Row } from "./client";
 import { SidePanel } from "./SidePanel";
 import { PageHeader } from "./AppShell";
-import { PickList, Pop, RangeInputs } from "./FindClient";
+import { pageList, PickList, Pop, RangeInputs } from "./FindClient";
 import { shownName } from "./bus";
 import { Icon } from "./icons";
 import { VOCAB, display, type VocabList } from "@/lib/vocab";
@@ -75,14 +75,21 @@ export function ReviewClient() {
   const listRef = useRef(list);
   listRef.current = list;
 
-  const load = useCallback(async (skip: string[], page = 0) => {
+  const reqId = useRef(0);          // only the newest load may update the page (coder review: overlapping loads)
+  const visited = useRef<number[]>([]); // pages actually shown, so "Previous" goes back even when the server walked forward
+  const load = useCallback(async (skip: string[], page = 0, opts: { back?: boolean } = {}) => {
+    const id = ++reqId.current;
     const l = listRef.current;
     const spec = { filters: l.filters, sort: l.sort, pageSize: l.pageSize };
     const r = await api<Resp>(`/api/review?page=${page}&skip=${encodeURIComponent(skip.join(","))}&spec=${encodeURIComponent(JSON.stringify(spec))}&lane=${encodeURIComponent(l.lanes.join(","))}`);
+    if (id !== reqId.current) return;  // a newer request was made meanwhile: drop this (stale) response
+    if (opts.back) visited.current = visited.current.filter((p) => p < r.page);
+    if (!visited.current.includes(r.page)) visited.current = [...visited.current.filter((p) => p < r.page), r.page];
     setData(r);
     setLoadError(null);
     setCur(r.rows[0] ?? null);
   }, []);
+  const prevPage = (cur: number) => visited.current.filter((p) => p < cur).pop() ?? Math.max(0, cur - 1);
   // start: the last list state for this user (item 2), then the first page
   useEffect(() => {
     api<Record<string, Facet[]>>("/api/facets").then(setFacets).catch(() => {});
@@ -94,14 +101,29 @@ export function ReviewClient() {
       setReady(true);
     })();
   }, []);
+  // reload only when what the SERVER uses changes - not on a column-width drag (coder review: a drag reloaded the queue)
+  const loadKey = JSON.stringify({ l: list.lanes, f: list.filters, s: list.sort, p: list.pageSize });
   useEffect(() => {
     if (!ready) return;
-    const s = loadSkipped(); setSkipped(s); load(s).catch(onLoadError);
-    const t = setTimeout(() => {
-      api("/api/prefs", { method: "PUT", body: JSON.stringify({ key: "review", value: { filters: list.filters, sort: list.sort, pageSize: list.pageSize, lanes: list.lanes, widths: list.widths } }) }).catch(() => {});
-    }, 800);
+    visited.current = [];
+    const s = loadSkipped(); setSkipped(s);
+    load(s).catch((e) => {
+      // a saved state the server no longer accepts must not break every visit: fall back to the defaults once
+      if ((e as { body?: { error?: string } }).body?.error === "bad_spec" && loadKey !== JSON.stringify({ l: [], f: {}, s: DEFAULT_LIST.sort, p: DEFAULT_LIST.pageSize })) setList(DEFAULT_LIST);
+      else onLoadError(e);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, loadKey, load, onLoadError]);
+  // remember the list state (incl. widths) for this user - only after a change, not on every visit
+  const saved = useRef<string | null>(null);
+  useEffect(() => {
+    if (!ready) return;
+    const v = JSON.stringify({ filters: list.filters, sort: list.sort, pageSize: list.pageSize, lanes: list.lanes, widths: list.widths });
+    if (saved.current === null) { saved.current = v; return; }
+    if (saved.current === v) return;
+    const t = setTimeout(() => { saved.current = v; api("/api/prefs", { method: "PUT", body: JSON.stringify({ key: "review", value: JSON.parse(v) }) }).catch(() => {}); }, 800);
     return () => clearTimeout(t);
-  }, [ready, list, load, onLoadError]);
+  }, [ready, list]);
   useEffect(() => {
     if (!cur) return;
     const stage = cur.stage && cur.stage !== "unknown" ? cur.stage : cur.stage_suggested && cur.stage_suggested !== "unknown" ? cur.stage_suggested : "";
@@ -144,8 +166,9 @@ export function ReviewClient() {
   return (
     <ReviewView data={data} cur={cur} skipped={skipped} form={form} busy={busy} msg={msg} loadError={loadError}
       setCur={setCur} setForm={setForm} onConfirm={confirm} onSkip={skip}
-      onNextPage={(p) => load(skipped, p).catch(onLoadError)}
-      list={list} setList={(l) => setList(l)} facets={facets} onClearSkipped={clearSkipped} />
+      onNextPage={(p) => load(skipped, p, { back: !!data && p < data.page }).catch(onLoadError)}
+      onPrevPage={() => data && load(skipped, prevPage(data.page), { back: true }).catch(onLoadError)}
+      list={list} setList={setList} facets={facets} onClearSkipped={clearSkipped} />
   );
 }
 
@@ -162,7 +185,8 @@ export interface ReviewViewProps {
   data: Resp | null; cur: Row | null; skipped: string[]; form: Form; busy: boolean; msg: string | null; loadError?: string | null;
   setCur: (r: Row | null) => void; setForm: (f: Form) => void; onConfirm: () => void; onSkip: () => void; onNextPage: (page: number) => void;
   // CAT-WO-02 (optional, so the CAT-WO-01.1 render tests keep their props)
-  list?: ReviewListState; setList?: (l: ReviewListState) => void; facets?: Record<string, Facet[]> | null; onClearSkipped?: () => void;
+  list?: ReviewListState; setList?: (u: ReviewListState | ((l: ReviewListState) => ReviewListState)) => void;
+  facets?: Record<string, Facet[]> | null; onClearSkipped?: () => void; onPrevPage?: () => void;
 }
 
 /** Dashboard-style counter card (Datum): caption, big number, one-line explanation. A lane card filters the list. */
@@ -174,18 +198,18 @@ function Kpi({ cap, n, exp, on, onClick }: { cap: string; n: number; exp: string
 }
 
 /** Presentational part of the Review page (no fetching), so it can be rendered in tests. */
-export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, setCur, setForm, onConfirm, onSkip, onNextPage, list = DEFAULT_LIST, setList, facets, onClearSkipped }: ReviewViewProps) {
+export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, setCur, setForm, onConfirm, onSkip, onNextPage, list = DEFAULT_LIST, setList, facets, onClearSkipped, onPrevPage }: ReviewViewProps) {
   const c = data?.counts ?? {};
   const [pop, setPop] = useState<string | null>(null);
   const [popAt, setPopAt] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const closePop = useCallback(() => setPop(null), []);
-  const upd = (l: Partial<ReviewListState>) => setList?.({ ...list, ...l });
+  const upd = (l: Partial<ReviewListState>) => setList?.((cur0) => ({ ...cur0, ...l }));
   const toggleLane = (lane: string) => upd({ lanes: list.lanes.includes(lane) ? list.lanes.filter((x) => x !== lane) : [...list.lanes, lane] });
   const width = (k: string) => list.widths[k] ?? COLS.find((x) => x.key === k)!.width;
   const startResize = (k: string, e: React.PointerEvent) => {
     e.preventDefault(); e.stopPropagation();
     const x0 = e.clientX, w0 = width(k);
-    const move = (ev: PointerEvent) => upd({ widths: { ...list.widths, [k]: Math.max(60, Math.min(900, Math.round(w0 + ev.clientX - x0))) } });
+    const move = (ev: PointerEvent) => setList?.((l) => ({ ...l, widths: { ...l.widths, [k]: Math.max(60, Math.min(900, Math.round(w0 + ev.clientX - x0))) } }));
     const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
   };
@@ -209,6 +233,35 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
   const pageSize = data?.pageSize ?? list.pageSize;
   const from = data && data.matched ? data.page * pageSize + 1 : 0;
   const to = data ? data.page * pageSize + data.pageRows : 0;
+  const lastPage = data?.matched ? Math.max(0, Math.ceil(data.matched / pageSize) - 1) : 0;
+  const pager = data && data.matched !== 0 ? (
+    <div className="pager">
+      <div className="left">
+        <span>
+          {data.matched != null ? `Page ${(data.page + 1).toLocaleString()} of ${(lastPage + 1).toLocaleString()} · ` : ""}
+          {data.matched == null ? `${data.pageRows} on this page` : data.pageRows ? `${from.toLocaleString()}–${to.toLocaleString()} of ${data.matched.toLocaleString()} files` : `None shown on this page · ${data.matched.toLocaleString()} files`}
+        </span>
+      </div>
+      <div className="left">
+        {setList ? <><span className="cap">Per page</span>
+          <div className="seg">{PAGE_SIZES.map((n) => <button key={n} className={list.pageSize === n ? "on" : ""} onClick={() => upd({ pageSize: n })}>{n}</button>)}</div></> : null}
+        <div className="pages">
+          <button className="pg" disabled={!data.page} onClick={() => (onPrevPage ? onPrevPage() : onNextPage(Math.max(0, data.page - 1)))} aria-label="Previous page">‹</button>
+          {(data.matched != null ? pageList(data.page, lastPage) : [data.page]).map((p, i) => p === "gap" ? <span key={`g${i}`} className="gap">…</span>
+            : <button key={p} className={`pg${p === data.page ? " on" : ""}`} onClick={() => onNextPage(p)} aria-current={p === data.page ? "page" : undefined}>{(p + 1).toLocaleString()}</button>)}
+          <button className="pg" disabled={data.nextPage == null} onClick={() => data.nextPage != null && onNextPage(data.nextPage)} aria-label="Next page">›</button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+  const chips: { k: string; label: string; text: string; clear: () => void }[] = [];
+  if (list.lanes.length) chips.push({ k: "lane", label: "Lane", text: list.lanes.map((l) => REASON[l] ?? l).join(", "), clear: () => upd({ lanes: [] }) });
+  for (const [k, lbl, voc] of [["kind", "Kind", "kind"], ["entity", "Entity", undefined], ["stage", "Signing stage", "stage"]] as const) {
+    const v = (list.filters as Record<string, string[] | undefined>)[k];
+    if (v?.length) chips.push({ k, label: lbl, text: v.map((x) => (voc && x !== "(none)" ? display(voc, x) : x)).join(", "), clear: () => upd({ filters: { ...list.filters, [k]: [] } }) });
+  }
+  const fy = list.filters.fy_range;
+  if (fy?.from || fy?.to) chips.push({ k: "fy", label: "Fiscal year", text: fy.from && fy.to ? `${fy.from} – ${fy.to}` : fy.from ? `from ${fy.from}` : `to ${fy.to}`, clear: () => upd({ filters: { ...list.filters, fy_range: {} } }) });
   const cell = (r: Row, k: string) =>
     k === "name" ? shownName(r.name, r.file_id) : k === "why" ? why(r) : k === "confidence" ? (r.confidence ?? "") : show(k, (r as unknown as Record<string, unknown>)[k]);
 
@@ -228,7 +281,7 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
         </> : null}
       />
       <div className="counters">
-        <Kpi cap="Open" n={c.open_total ?? 0} exp="Files waiting for a person, across all lanes." />
+        <Kpi cap="Open" n={c.open_total ?? 0} exp="Files waiting for a person, across all lanes." on={!!setList && !list.lanes.length} onClick={setList ? () => upd({ lanes: [] }) : undefined} />
         <Kpi cap="Stage unknown" n={c.stage_unknown ?? 0} exp="Signed documents whose signing stage couldn't be read." on={list.lanes.includes("stage_unknown")} onClick={setList ? () => toggleLane("stage_unknown") : undefined} />
         <Kpi cap="Executed, low confidence" n={c.low_confidence_executed ?? 0} exp="Marked fully executed, but the scan isn't sure." on={list.lanes.includes("low_confidence_executed")} onClick={setList ? () => toggleLane("low_confidence_executed") : undefined} />
         <Kpi cap="No kind" n={c.no_kind ?? 0} exp="The catalog couldn't tell what the document is." on={list.lanes.includes("no_kind")} onClick={setList ? () => toggleLane("no_kind") : undefined} />
@@ -254,20 +307,12 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
               ) : null}
             </div>
           </div>
-          {data ? (
-            <div className="pager">
-              <div className="left"><span>{data.matched == null ? `${data.pageRows} on this page` : data.pageRows ? `${from.toLocaleString()}–${to.toLocaleString()} of ${data.matched.toLocaleString()} files` : `None shown on this page · ${data.matched.toLocaleString()} files`}</span></div>
-              <div className="left">
-                {setList ? <><span className="cap">Per page</span>
-                  <div className="seg">{PAGE_SIZES.map((n) => <button key={n} className={list.pageSize === n ? "on" : ""} onClick={() => upd({ pageSize: n })}>{n}</button>)}</div></> : null}
-                <div className="pages">
-                  <button className="pg" disabled={!data.page} onClick={() => onNextPage(Math.max(0, data.page - 1))} aria-label="Previous page">‹</button>
-                  <button className="pg on" aria-current="page">{(data.page + 1).toLocaleString()}</button>
-                  <button className="pg" disabled={data.nextPage == null} onClick={() => data.nextPage != null && onNextPage(data.nextPage)} aria-label="Next page">›</button>
-                </div>
-              </div>
+          {chips.length && setList ? (
+            <div className="chips" aria-label="Active filters">
+              {chips.map((ch) => <span key={ch.k} className="chip"><b>{ch.label}</b>{ch.text}<button aria-label={`Remove ${ch.label} filter`} onClick={ch.clear}>×</button></span>)}
             </div>
           ) : null}
+          {pager}
           <div className="grid-wrap">
             <table className="grid queue" style={{ width: COLS.reduce((n, x) => n + width(x.key), 0) }}>
               <colgroup>{COLS.map((x) => <col key={x.key} style={{ width: width(x.key) }} />)}</colgroup>
@@ -277,7 +322,9 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
                 return (
                   <th key={x.key} aria-sort={on ? (list.sort.dir === "asc" ? "ascending" : "descending") : undefined}>
                     <div className="th">
-                      <span className={`lbl${x.sort && setList ? " sortable" : ""}`} onClick={() => x.sort && setList && sortBy(x.sort)}>{x.label}</span>
+                      {x.sort && setList
+                        ? <button type="button" className="lbl sortable" onClick={() => sortBy(x.sort!)} title={`Sort by ${x.label}`}>{x.label}</button>
+                        : <span className="lbl">{x.label}</span>}
                       {x.sort && setList ? <span className={`sort${on ? " on" : ""}`} aria-hidden="true">{on ? (list.sort.dir === "asc" ? "↑" : "↓") : "↕"}</span> : null}
                       {x.filter && setList ? (
                         <span className="pop-wrap" style={{ marginLeft: "auto" }}>
@@ -285,17 +332,22 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
                             onClick={(e) => { e.stopPropagation(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setPopAt({ top: r.bottom + 6, left: Math.max(8, Math.min(r.right - 320, window.innerWidth - 336)) }); setPop(pop === fid ? null : fid); }}>
                             <Icon name="filter" />
                           </button>
-                          <Pop open={pop === fid} onClose={closePop} className="popover fixed" style={popAt}>{filterBody(x.filter)}</Pop>
+                          <Pop open={pop === fid} onClose={closePop} className="popover fixed" style={popAt}>
+                            <div className="cap" style={{ marginBottom: 6 }}>{x.filter === "lane" ? "Lane is any of" : x.filter === "fy" ? "Fiscal year from / to" : `${x.label} is any of`}</div>
+                            {filterBody(x.filter)}
+                          </Pop>
                         </span>
                       ) : null}
                     </div>
-                    {setList ? <span className="resize" role="separator" aria-orientation="vertical" aria-label={`Resize ${x.label}`} onPointerDown={(e) => startResize(x.key, e)} /> : null}
+                    {setList ? <span className="resize" role="separator" aria-orientation="vertical" aria-label={`Resize ${x.label}`} onPointerDown={(e) => startResize(x.key, e)}
+                      onDoubleClick={() => { const w = { ...list.widths }; delete w[x.key]; upd({ widths: w }); }} /> : null}
                   </th>
                 );
               })}</tr></thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.file_id} onClick={() => setCur(r)} className={cur?.file_id === r.file_id ? "sel" : ""}>
+                  <tr key={r.file_id} onClick={() => setCur(r)} className={cur?.file_id === r.file_id ? "sel" : ""} tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setCur(r); } }} aria-selected={cur?.file_id === r.file_id}>
                     {COLS.map((x) => (
                       <td key={x.key} className={x.key === "why" ? "why" : x.key === "name" ? "name" : undefined} title={x.key === "why" || x.key === "name" ? String(cell(r, x.key)) : undefined}>
                         {cell(r, x.key)}
@@ -306,12 +358,15 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
                 ))}
                 {data && !rows.length ? (
                   <tr><td className="empty" colSpan={COLS.length}>
-                    Nothing shown on this page.{data.nextPage != null ? <> <button className="link" onClick={() => onNextPage(data.nextPage!)}>Next page</button></> : null}
+                    {data.matched === 0 && !nFilters ? "Nothing waiting for review."
+                      : data.matched === 0 ? <>No files match these filters. {setList ? <button className="link" onClick={() => upd({ lanes: [], filters: {} })}>Clear all</button> : null}</>
+                      : <>Nothing shown on this page.{data.nextPage != null ? <> <button className="link" onClick={() => onNextPage(data.nextPage!)}>Next page</button></> : null}</>}
                   </td></tr>
                 ) : null}
               </tbody>
             </table>
           </div>
+          {pager}
         </section>
         {cur ? (
           <SidePanel row={cur} onClose={() => setCur(null)}>
@@ -337,10 +392,11 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
                 <p className="muted small">Reviewed by is set to you. No other label or file property is changed.</p>
               </fieldset>
               <div className="actions">
-                <button className="btn primary" type="submit" disabled={busy}>{data?.canWrite ? "Confirm and next" : "Confirm and next (asks for label-write access once)"}</button>
+                <button className="btn primary" type="submit" disabled={busy}>Confirm and next</button>
                 <button className="btn" type="button" onClick={onSkip} disabled={busy}>Skip</button>
               </div>
-              {msg ? <p className="status">{msg}</p> : null}
+              {!data?.canWrite ? <p className="muted small">The first Confirm asks Google once for label-write access.</p> : null}
+              {msg ? <p className={`status${msg.startsWith("Not saved") ? " error" : ""}`} role="status" aria-live="polite">{msg}</p> : null}
             </form>
           </SidePanel>
         ) : null}

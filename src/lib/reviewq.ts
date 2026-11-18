@@ -13,6 +13,8 @@ const SORT: Record<string, string> = {
   kind: "kind", stage: "stage", fiscal_year: "fiscal_year", modified_time: "modified_time", entities: "entities", file_id: "file_id",
 };
 export const REVIEW_SORTABLE = Object.keys(SORT);
+/** Review list columns (widths saved per user, item 2). */
+export const REVIEW_COLUMNS = ["name", "why", "stage", "kind", "entities", "fiscal_year", "confidence"];
 
 export interface ReviewSpec { spec: FindSpec; lanes: string[] }
 
@@ -40,8 +42,11 @@ export function reviewQuery(r: ReviewSpec, skip: string[], page: number): { sql:
   parts.push(`NOT (file_id = ANY(${p(skip)}::text[]))`);
   if (r.lanes.length) parts.push(`queue_reason = ANY(${p(r.lanes)}::text[])`);
   const col = r.spec.sort?.col ?? "queue";
-  const dir = col === "queue" ? "" : r.spec.sort?.dir === "asc" ? " ASC NULLS LAST" : " DESC NULLS LAST";
-  const order = col === "queue" ? SORT.queue : `${SORT[col]}${dir}, queue_rank, confidence_rank`;
+  const desc = r.spec.sort?.dir === "desc";
+  // "queue" = the review order (most uncertain first); descending reverses it (coder review: the arrow must do something)
+  const order = col === "queue"
+    ? (desc ? "queue_rank DESC, confidence_rank DESC" : SORT.queue)
+    : `${SORT[col]}${desc ? " DESC NULLS LAST" : " ASC NULLS LAST"}, queue_rank, confidence_rank`;
   const pageSize = r.spec.pageSize ? pageSizeOf(r.spec) : 50; // CAT-WO-01 default stays 50 when no size is chosen
   return {
     params, pageSize,

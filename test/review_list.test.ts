@@ -19,6 +19,10 @@ describe("CAT-WO-02 item 2 · Review queue lists run in SQL", () => {
     expect(q.sql).not.toMatch(/k1|no_kind|2020/);
     expect(q.countSql).toContain("FROM app.v_review_queue WHERE");
   });
+  it("the queue order can be reversed (the Why header's arrow does something)", () => {
+    const q = reviewQuery(parseReviewSpec(JSON.stringify({ sort: { col: "queue", dir: "desc" } }), null), [], 0);
+    expect(q.sql).toContain("ORDER BY queue_rank DESC, confidence_rank DESC, file_id");
+  });
   it("refuses unknown lanes, unknown sort columns and injection", () => {
     expect(() => parseReviewSpec(null, "no_kind;drop")).toThrow(SpecError);
     expect(() => parseReviewSpec(JSON.stringify({ sort: { col: "name" } }), null)).toThrow(SpecError);

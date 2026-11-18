@@ -267,18 +267,17 @@ input[type=checkbox] { accent-color: var(--ink); width: 14px; height: 14px; marg
 .ed-part2 { background: var(--warn-soft); color: var(--warn-ink); }
 
 /* ------------------------------------------------------------------ dashboard counter cards (Review queue) */
-.counters { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; margin-bottom: 16px; }
+.counters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+@media (min-width: 1500px) { .counters { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
 .ctr { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-card); padding: 16px 20px; display: flex; flex-direction: column-reverse; justify-content: flex-end; gap: 8px; }
 .ctr b { font-size: 24px; line-height: 32px; font-weight: 600; }
-.ctr span { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .025em; color: var(--muted); }
+.ctr:not(.kpi) span { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .025em; color: var(--muted); }
 .ctr small { font-size: 12px; color: var(--muted); }
 .ctr.kpi { flex-direction: column; justify-content: flex-start; gap: 0; }
 .ctr.kpi .k-cap { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .025em; color: var(--muted); }
 .ctr.kpi .k-num { margin-top: 8px; font-size: 24px; line-height: 32px; font-weight: 600; }
 .ctr.kpi .k-exp { margin-top: 4px; font-size: 12px; color: var(--muted); }
-.review-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 42%); gap: 16px; align-items: start; }
 .queue { width: 100%; }
-.queue td.why { color: var(--muted); font-size: 12px; }
 .review-form { display: grid; gap: 10px; }
 .review-form fieldset { border: 1px solid var(--border); border-radius: var(--radius); margin: 0; padding: 10px 12px; display: grid; gap: 8px; }
 .review-form legend { font: 500 10px/1 var(--f-mono); text-transform: uppercase; letter-spacing: .12em; color: var(--muted); padding: 0 4px; }
@@ -292,7 +291,7 @@ input[type=checkbox] { accent-color: var(--ink); width: 14px; height: 14px; marg
 .center h1 { font: 400 30px/1.2 var(--f-serif); }
 
 @media (max-width: 1100px) {
-  .find.with-panel, .review-body { grid-template-columns: 1fr; }
+  .find.with-panel { grid-template-columns: 1fr; }
   .panel { position: static; max-height: none; }
 }
 @media (max-width: 760px) {
@@ -329,4 +328,20 @@ input[type=checkbox] { accent-color: var(--ink); width: 14px; height: 14px; marg
 button.ctr.kpi { font: inherit; text-align: left; color: var(--ink); cursor: pointer; }
 .ctr.kpi.link-card:hover { border-color: rgba(28,28,28,.4); }
 .ctr.kpi.link-card.on { border-color: var(--ink); box-shadow: inset 3px 0 0 var(--signal), var(--shadow-card); }
-.grid.queue td.why { color: var(--muted); font-size: 12px; }
+.grid
+/* designer review (Review queue) */
+.ctr.kpi .k-exp { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctr.kpi.link-card:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.status.error { background: #fde9e7; color: #8f1c13; border: 1px solid #f3c4bf; border-radius: var(--radius); padding: 10px 14px; margin: 0 0 16px; }
+.review-form .status.error { margin: 0; }
+.review-form :is(select, textarea, input):focus-visible { outline: 2px solid var(--ink); outline-offset: -1px; }
+.review-form select, .review-form input[type=date] { height: 32px; }
+.review-form textarea { resize: vertical; }
+.review-form input[type=radio] { accent-color: var(--ink); }
+.actions { flex-wrap: wrap; }
+.grid.queue th .lbl { cursor: default; }
+.grid.queue th button.lbl { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.grid.queue th button.lbl:hover { text-decoration: underline; text-underline-offset: 3px; }
+.grid tbody tr:focus-visible td { outline: none; background: var(--sel); }
+.grid tbody tr:focus-visible td:first-child { box-shadow: inset 3px 0 0 var(--ink); }
+@media (max-width: 760px) { .counters { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ctr.kpi .k-exp { display: none; } }

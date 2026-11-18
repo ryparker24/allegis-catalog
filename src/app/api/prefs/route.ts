@@ -2,6 +2,7 @@ import { getEnv } from "@/lib/env";
 import { json, requireUser } from "@/lib/guard";
 import { db } from "@/lib/db";
 import { parseLayout, parseSpec, SpecError } from "@/lib/find";
+import { REVIEW_COLUMNS, REVIEW_SORTABLE } from "@/lib/reviewq";
 
 export const dynamic = "force-dynamic";
 
@@ -30,8 +31,18 @@ export async function PUT(req: Request) {
     void _search;
     const lanes = Array.isArray(b.value?.lanes) ? (b.value!.lanes as unknown[]).map(String).filter((l) => ["stage_unknown", "low_confidence_executed", "no_kind"].includes(l)) : undefined;
     // the Review queue sorts on its own columns (queue / confidence / ...): kept as {col, dir} only, validated on use
-    const rsort = b.key === "review" && b.value?.sort && typeof b.value.sort === "object" ? { col: String((b.value.sort as { col?: unknown }).col ?? "queue").slice(0, 20), dir: (b.value.sort as { dir?: unknown }).dir === "asc" ? "asc" : "desc" } : undefined;
-    value = { ...rest, ...(rsort ? { sort: rsort } : {}), page: 0, ...parseLayout(b.value), viewId: Number.isInteger(b.value?.viewId) ? b.value!.viewId : null, ...(lanes ? { lanes } : {}) };
+    // the Review sort column must be one the Review list can sort on (coder review: a bad one would break every visit)
+    const rcol = b.key === "review" && b.value?.sort && typeof b.value.sort === "object" ? String((b.value.sort as { col?: unknown }).col ?? "") : "";
+    const rsort = b.key === "review" && REVIEW_SORTABLE.includes(rcol) ? { col: rcol, dir: (b.value!.sort as { dir?: unknown }).dir === "asc" ? "asc" : "desc" } : undefined;
+    // Review's widths are keyed by its own columns (why / confidence aren't Find columns)
+    const rwidths: Record<string, number> = {};
+    if (b.key === "review" && b.value?.widths && typeof b.value.widths === "object") {
+      for (const [k, v] of Object.entries(b.value.widths as Record<string, unknown>)) {
+        const n = Math.round(Number(v));
+        if (REVIEW_COLUMNS.includes(k) && Number.isFinite(n)) rwidths[k] = Math.max(60, Math.min(900, n));
+      }
+    }
+    value = { ...rest, ...(rsort ? { sort: rsort } : {}), page: 0, ...(b.key === "review" ? { widths: rwidths } : parseLayout(b.value)), viewId: Number.isInteger(b.value?.viewId) ? b.value!.viewId : null, ...(lanes ? { lanes } : {}) };
   } catch (e) {
     return json({ error: "bad_spec", reason: e instanceof SpecError ? e.message : "invalid" }, 400);
   }

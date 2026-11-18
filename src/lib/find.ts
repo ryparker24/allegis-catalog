@@ -5,7 +5,7 @@
 import { COLUMN_BY_KEY, COLUMN_DEFS, DEFAULT_PAGE_SIZE, PAGE_SIZES, PICK_FILTER_KEY, isSortable } from "./columns";
 import { VOCAB } from "./vocab";
 
-/** v1 page size; kept for the Review queue (its route imports it). Find uses spec.pageSize. */
+/** v1 page size (CAT-WO-01). Find and the Review queue now use spec.pageSize (10 / 25 / 100). */
 export const PAGE_SIZE = 50;
 
 export const GROUPABLE = ["kind", "entity", "portco", "fiscal_year", "stage", "tier", "workstream"] as const;

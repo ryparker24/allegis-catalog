@@ -53,7 +53,7 @@ function groupValue(r: Row, g: string): string[] {
   if (Array.isArray(v)) return v.length ? v.map(String) : ["(none)"];
   return [v == null || v === "" ? "(none)" : String(v)];
 }
-function pageList(cur: number, last: number): (number | "gap")[] {
+export function pageList(cur: number, last: number): (number | "gap")[] {
   const s = new Set([0, last, cur - 1, cur, cur + 1].filter((n) => n >= 0 && n <= last));
   const out: (number | "gap")[] = [];
   let prev = -1;
