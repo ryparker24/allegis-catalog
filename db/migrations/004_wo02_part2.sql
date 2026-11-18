@@ -30,8 +30,10 @@ DO $$ BEGIN
     ALTER TABLE cat.document ADD CONSTRAINT document_parties_codes CHECK (
         coalesce(issuing_entity_auto, 'X') ~ '^[A-Za-z0-9()_ -]{1,40}$' AND
         coalesce(issuing_entity_confirmed, 'X') ~ '^[A-Za-z0-9()_ -]{1,40}$' AND
-        coalesce(array_to_string(receiving_entities_auto, ','), 'X') ~ '^[A-Za-z0-9()_ ,-]{1,400}$' AND
-        coalesce(array_to_string(receiving_entities_confirmed, ','), 'X') ~ '^[A-Za-z0-9()_ ,-]{1,400}$') NOT VALID;
+        coalesce(array_to_string(receiving_entities_auto, ','), 'X') ~ '^[A-Za-z0-9()_ ,-]+$' AND
+        coalesce(array_to_string(receiving_entities_confirmed, ','), 'X') ~ '^[A-Za-z0-9()_ ,-]+$' AND
+        length(coalesce(array_to_string(receiving_entities_auto, ','), '')) <= 400 AND
+        length(coalesce(array_to_string(receiving_entities_confirmed, ','), '')) <= 400) NOT VALID;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER TABLE cat.document VALIDATE CONSTRAINT document_status_codes;
 ALTER TABLE cat.document VALIDATE CONSTRAINT document_parties_codes;

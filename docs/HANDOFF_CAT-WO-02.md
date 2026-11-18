@@ -89,12 +89,16 @@ Throwaway Neon branch: `catwo02-test-throwaway` = `br-red-band-bd2d79yz` (endpoi
   | Rule | What it reads | Issuing | Receiving | K-1s |
   |---|---|---|---|---:|
   | K1-R3 issued to LPs | a K-1 container folder (K-1s / tax returns / investor package) holding ≥3 K-1s, one fund/SPV on the file | the fund/SPV | `LP` | 3,042 |
-  | K1-R2 GP's K-1 from its fund | "GP entities" / "GPs" folders, or a GP-only entity | the GP's fund (`X (GP)` → `X`) | the GP | 588 |
-  | K1-R2, fund ambiguous (e.g. MTV-IV (GP): A or B) | same | blank | the GP | 353 |
+  | K1-R2 GP's K-1 from its fund | "GP entities" / "GPs" folders, or a GP-only entity outside a many-K-1 folder | the GP's fund (`X (GP)` → `X`) | the GP | 309 |
+  | K1-R2, fund ambiguous (e.g. MTV-IV (GP): A or B) | same | blank | the GP | 143 |
   | K1-R1 management company received | "Mgmt Co / … Investments in …" | — | — | 0 (see proposal P-K1 below) |
-  | unknown → Review queue | | blank | blank | 3,233 |
+  | unknown → Review queue | | blank | blank | 3,722 |
 
-- **After (applied on the branch, per file):** issuing set 3,660 · receiving set 4,010 · both 3,660 (of 7,216). Issuing by type: fund 3,512, SPV 118. Receiving: LP 3,042, GP 941.
+- **After** (applied on the branch, counted per file through `app.v_find_x`, so copies of a K-1 count too):
+  - issuing set 3,385 · receiving set 3,527 · both 3,385, out of 7,216;
+  - issuing by type: fund 3,233, SPV 118;
+  - receiving: LP 3,042, GP 452.
+- **Why lower than the first count** (3,660 / 4,010): the coder review asked that a GP-only file in a folder holding many K-1s not be read as "received". Such a folder may be a GP issuing K-1s to its own members, so those files now stay unknown.
 
 **0.2 Status markers.** Measured on the 46,259 labelled files. Markers use letter boundaries, so `Report_FINAL` and `Draft_v2` are caught.
 
@@ -103,7 +107,7 @@ Throwaway Neon branch: `catwo02-test-throwaway` = `br-red-band-bd2d79yz` (endpoi
 | name "final" | 3,396 | k1 1,398 · (none) 737 · tax_return 439 · tax_form 381 · correspondence 201 |
 | folder "Final" | 1,403 | (none) 844 · quarterly_report 149 · tax_return 104 · k1 103 · tax_form 95 |
 | name "draft" | 1,254 | (none) 523 · k1 220 · tax_return 179 · tax_form 147 · correspondence 121 |
-| name "v2 / rev 3" | 1,040 | (none) 481 · k1 139 · financial_statements 118 · gp_note 64 · pbc_request 50 |
+| name "v2 / ver 2 / rev 3" | 477 | (none) 242 · k1 118 · pbc_request 30 · valuation_memo 22 · financial_statements 20 |
 | name "signed / executed" | 538 | (none) 204 · legal_agreement 58 · tax_form 50 · tax_return 48 |
 | folder "Drafts" | 385 | (none) 165 · tax_form 51 · k1 50 · tax_return 49 |
 | name "redline / blackline" | 42 | lpa 14 · (none) 9 · subscription_agreement 8 |
@@ -111,12 +115,14 @@ Throwaway Neon branch: `catwo02-test-throwaway` = `br-red-band-bd2d79yz` (endpoi
 
 Resulting Status:
 - **Final 5,611**, of which 696 are fully executed agreements (R-022: fully executed implies Final).
-- **Draft 1,313.**
-- **In review 776.**
+- **Draft 1,348.**
+- **In review 356.**
 - **Issued 1.**
 - **Conflicting markers (draft with final): 51**, left blank and routed to Review.
-- **No marker: 38,507**, left blank.
+- **No marker: 38,892**, left blank.
 - Executable kinds only ever get Final, and only when fully executed. Their signing progress stays in Stage.
+- **Version-marker fix:** the first count (1,040 files) also matched roman-numeral fund names such as "MTV-V 10.31.24". The marker now needs "v" fused to the number ("v2", "v3.1") or "ver" / "rev".
+- **Set on the branch:** Status on 7,252 files (per file, through `v_find_x`).
 
 **0.3 Label drift since release.** All 46,259 labelled files were read live (Drive 200 for all 46,259, 420 s):
 - every one still carries the Allegis Document label;
@@ -127,7 +133,7 @@ So the read-back's first run has nothing person-set to pick up.
 
 **0.4 Re-sync size.**
 - **0 today.** `ops.run` shows no incremental crawl since the full crawls of 11-15, and every labelled document was last updated before the bulk label run finished. So no catalog value has changed since labelling.
-- **Once Parties and Status are published**, the re-sync pushes the new values: issuing 3,660 · receiving 4,010 · status 7,639 files (branch-derived).
+- **Once Parties and Status are published**, the re-sync pushes the new values: issuing 3,385 · receiving 3,527 · status 7,252 files (branch-derived).
 - **Note:** the "nightly `drive_crawl.py incremental`" has never run. Ryan may want to schedule it.
 
 ### What was built (Part 2)
@@ -149,14 +155,25 @@ So the read-back's first run has nothing person-set to pick up.
     2. Check the file is in catalog scope (`v_find_x`).
     3. Check access live as the user (opens, `canModifyLabels`, live tier not secret).
     4. Write `modifyLabels` as the user.
-    5. Set Catalog Review to Confirmed with Reviewed by.
-    6. Insert one `app.review_event` row per file.
+    5. For a **single** edit only, set Catalog Review to Confirmed with Reviewed by.
+    6. Insert one `app.review_event` row per file: `confirmed` for single edits, `edited` for bulk.
   - Bulk is capped at 500 and writes in batches of 25 with the labels_sync.py retry rules.
+  - Bulk audit rows are written after each batch, and a retry budget of 100 keeps a job within the Worker's subrequest limit.
+  - Bulk does not stamp Confirmed. Stamping it on 500 unreviewed files would freeze every field on them against the re-sync (CISO review). The bulk-edited field is still protected, because it now differs from the machine write.
   - Handling is never written, and any Handling key in a request is refused.
   - Parties / Status are refused until published.
 - **Two-way sync (item 7):** `pipeline/label_sync_wo02.py`.
-  - `readback` reads labels for every in-scope file and stores a person's values (Catalog Review = Confirmed, or live ≠ last machine write) as `*_confirmed`. It also keeps `ops.label_state` and refills `app.labelled_file` from Drive.
-  - `resync` re-reads live labels just before writing, never overwrites person-owned fields (skipped and counted), and uses the same batching, retry and modifiedTime sampling as labels_sync.py.
+  - `readback` reads labels for every in-scope file and stores a person's values as `*_confirmed`.
+    - A value counts as the person's if live ≠ the last machine write (set or cleared), or if Catalog Review is Confirmed or Wrong with Reviewed by.
+    - On first sight of a file, its machine snapshot is seeded from its live labels, so stale catalog values are never taken for edits.
+    - A second edit to an owned field is captured too.
+    - Secret-tier files are dropped, and unknown Drive choices are skipped and counted.
+    - It keeps `ops.label_state` and refills `app.labelled_file` from Drive.
+  - `resync` writes only files the read-back has already seen, and refuses to run without that state.
+    - It re-reads and re-plans each batch just before writing it, so an edit made mid-run wins.
+    - It never overwrites person-owned fields (skipped and counted) or secret-tier files.
+    - It uses the same batching, capped retry and modifiedTime sampling as labels_sync.py.
+    - A re-run simply recomputes the difference, so it is safe to resume.
   - Both need an explicit `--db-url-file`, so they can never pick up main by default. Both stream Drive results per batch, which keeps memory flat.
 
 ### Guard tests (Part 2)
@@ -170,8 +187,11 @@ So the read-back's first run has nothing person-set to pick up.
   - bulk offers only kind / entity / fiscal year / status;
   - a confirmed bulk skips no-access and out-of-scope files and retries a 503;
   - a 403 counts as no access and is not retried.
-- **Unit totals:** `npx vitest run` → **76 passed (76)**; `py pipeline\test_label_sync_wo02.py` → **17/17 passed**.
+- **Unit totals:** `npx vitest run` → **79 passed (79)**; `py pipeline\test_label_sync_wo02.py` → **22/22 passed**.
+  - The pipeline set includes: a person clearing a value isn't re-filled; a file marked Wrong isn't re-synced; a stale catalog value isn't taken as person-owned on first sight.
 - **G-E2 modifiedTime after a single and a bulk edit.** Live on ONE pilot-folder file through the app's own `editOne` / `editBulk`; review events on the branch; restored afterwards.
+  - Re-run on the post-review code: bulk no longer touches Catalog Review, so AFTER2 still shows the Confirmed set by the single edit just before.
+  - The script now accepts only the throwaway endpoint (an upper-cased main endpoint → `refusing: not the throwaway branch endpoint`) and restores in a `finally`.
 ```
 BEFORE   {"file_id":"180DfKiZCFvBptMVPfYEzyQsETkbBkmtw","modifiedTime":"2023-08-14T23:01:09.192Z","kind":"subscription_agreement","fiscal_year":null,"entities":["ACCSO"],"stage":"fully_executed","tier":"normal","review_status":"needs_review"}
 SINGLE   {"http":200,"ok":true,"labels":["doc","review"]}
@@ -184,13 +204,21 @@ PASS  G-E2 modifiedTime unchanged by the single edit, the bulk edit and the rest
 PASS  G-E2 restore: Allegis Document / Execution / Catalog Review fields identical to BEFORE
 PASS  G-E2 Handling label untouched throughout
 ```
-- **G-E4 `test_edited_value_not_overwritten_by_resync`.** Unit (17/17 above), plus live on the same pilot file: the app set fiscal year 2020, the catalog has blank, and the real `--resync` ran.
+- **G-E4 `test_edited_value_not_overwritten_by_resync`.** Unit (22/22 above), plus live on the same pilot file.
+  - The app set fiscal year 2020; the catalog has it blank.
+  - The real `--resync` ran on the post-review code, after the first applied read-back (it now refuses to run without one).
 ```
 EDITED   {"http":200,"modifiedTime":"2023-08-14T23:01:09.192Z",...,"fiscal_year":2020,...,"review_status":"confirmed"}
 RESYNC DRY RUN (nothing written): read 1 · confirmed by a person 0 · re-synced 0 · skipped as person-owned 1 · errors 0
 RESYNC APPLIED: read 1 · confirmed by a person 0 · re-synced 0 · skipped as person-owned 1 · errors 0   (by field: skipped_person fiscal_year 1)
 RESTORE  {"http":200,"modifiedTime":"2023-08-14T23:01:09.192Z",...,"fiscal_year":null,...,"review_status":"needs_review"}
 PASS  restored to BEFORE (fields identical, modifiedTime 2023-08-14T23:01:09.192Z -> 2023-08-14T23:01:09.192Z)
+```
+- **Per-run sync report** (item 7.3, throwaway branch, `ops.label_sync_run`):
+```
+READBACK APPLIED: read 46,259 · confirmed by a person 0 · re-synced 0 · skipped as person-owned 0 · errors 0
+  labelled 46,259; read but without the Allegis Document label 0      -> app.labelled_file: 46,259 rows, source drive_readback
+RESYNC APPLIED (--only pilot): read 1 · re-synced 0 · skipped as person-owned 1 (fiscal_year) · errors 0 · never read back 0
 ```
 - **labels_setup check** (`py pipeline\labels_setup_wo02.py --check --db-url-file <branch>`):
 ```
@@ -201,6 +229,37 @@ Execution: 3 fields now; + Status (5 choices) + Issued date = 5; title -> 'Statu
 design check: OK
 --check: nothing created, nothing published.
 ```
+
+### Reviews (coder + CISO, Part 2)
+Both reviews ran read-only on `f408e52..cat-wo-02-p2`. Each finding and its fix is in commit `4204e57`.
+- **CISO: no high-severity findings.** Fixed:
+  - the re-sync re-plans per batch (a mid-run edit could be overwritten);
+  - bulk audit rows per batch, plus a retry budget;
+  - bulk no longer stamps Confirmed;
+  - name words checked before the allow-list in masking;
+  - `Object.hasOwn` on choices;
+  - secret tier skipped;
+  - unknown choices skipped;
+  - a Parties code-only CHECK;
+  - one generic `no_access`;
+  - guard-script allow-list and `finally`;
+  - a read-only fallback session.
+  - Left as info: bulk has no per-user rate limit beyond the 500 cap (Ryan is the only user).
+- **Coder: 7 defects, all fixed.**
+  - Find was reading `v_find` with the new columns, so every request returned 500.
+  - The first read-back seeding (above).
+  - Second edits were not captured.
+  - Clearing a value was undone.
+  - An executed date alone was refused even on fully executed files.
+  - Unknown choices were stored.
+  - An idle connection was held through the long Drive read.
+  - Minors also fixed: capped retries, re-sync needs state, mtime counts recorded, derive writes only changes and clears non-K-1 parties, the version-marker false positive, the K1-R2 gate, and regex sentinels.
+  - Carried to the Review-queue work after the hotfix:
+    - app edits must not take files out of the queue unless they are `confirmed` / `wrong`;
+    - the Review form must route through the same executed-date and unset rules.
+- **Not changed (by design / noted):**
+  - A person's *blank* is kept on the label and protected from the re-sync. The catalog still shows the rule value until a reviewer sets a value, because `*_confirmed` NULL falls back to auto.
+  - Period `month` / `as_of` / `n_a` has no catalog column, so it is kept on the label only.
 
 ### For Ryan to rule on (nothing below is applied)
 **Item 9 · proposed no-kind rules** (F-018). 18,417 no-kind labelled files. First match wins, in this order. Counts are the files each rule would set.
