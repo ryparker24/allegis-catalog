@@ -164,15 +164,16 @@ describe("item 4 · saved-view folders", () => {
 describe("item 3 · Labels panel", () => {
   it("lists every label and field with code + meaning, and marks who can edit", () => {
     const L = buildLabelsPanel({ entity: new Map([["MTV-II", "Media Technology Equity Partners, LP"]]), portco: new Map() });
-    // Part 2: Parties (L11) shows as planned until published; Execution notes its rename (R-022)
+    // Part 2 (published 2026-11-18): Parties (L11) and Status & Execution come from labels_schema.json; same order
     expect(L.map((x) => x.key)).toEqual(["doc", "exec", "parties", "handling", "review"]);
-    expect(L.find((x) => x.key === "parties")!.planned).toBe(true);
+    expect(L.find((x) => x.key === "parties")!.planned).toBeFalsy();
+    expect(L[1].title).toBe("Status & Execution");
     const kind = L[0].fields.find((f) => f.key === "kind")!;
     expect(kind.choices).toContainEqual({ code: "k1", meaning: "K-1" });
     expect(L[0].fields.find((f) => f.key === "entity")!.choices).toContainEqual({ code: "MTV-II", meaning: "Media Technology Equity Partners, LP" });
     expect(L.find((x) => x.key === "handling")!.fields.every((f) => f.editable === "never")).toBe(true);   // Handling: never editable
     expect(L[1].fields.find((f) => f.key === "stage")!.editable).toBe("app");
-    expect(L[1].fields.find((f) => f.key === "status")).toMatchObject({ planned: true, choices: expect.arrayContaining([{ code: "superseded", meaning: "Superseded" }]) });
+    expect(L[1].fields.find((f) => f.key === "status")).toMatchObject({ title: "Status", editable: "app", choices: expect.arrayContaining([{ code: "superseded", meaning: "Superseded" }]) });
     const recv = L.find((x) => x.key === "parties")!.fields.find((f) => f.key === "receiving_entities")!;
     expect(recv.choices.map((c) => c.code)).toEqual(expect.arrayContaining(["MTV-II", "LP", "EXTERNAL"]));
   });

@@ -6,6 +6,7 @@ import { SpecError } from "@/lib/find";
 import { DEFAULT_LIST, ReviewView, isExecutable, type ReviewViewProps } from "@/components/ReviewClient";
 import type { Row } from "@/components/client";
 import { buildReviewMods, hasField, validateReview } from "@/lib/labels";
+import { reviewWrite } from "@/lib/review";
 
 describe("CAT-WO-02 item 2 · Review queue lists run in SQL", () => {
   it("no spec: CAT-WO-01's order and page size are unchanged", () => {
@@ -86,11 +87,31 @@ describe("CAT-WO-02 item 6 · Review lanes and the Status write", () => {
     expect(q.sql).toContain("ORDER BY status ASC NULLS LAST");
     expect(q.sql).toMatch(/requires_execution, status\s+FROM app.v_review_queue/);
   });
-  it("doc_status: refused while the Status field is unpublished, never together with a stage, unknown values refused", () => {
-    expect(validateReview({ status: "confirmed", doc_status: "final" })).toEqual({ ok: false, reason: hasField("exec", "status") ? "x" : "label_not_published:exec.status" });
+  it("doc_status: accepted once Status is published (refused before), never together with a stage, unknown values refused", () => {
+    if (hasField("exec", "status")) expect(validateReview({ status: "confirmed", doc_status: "final" })).toMatchObject({ ok: true, value: { docStatus: "final" } });
+    else expect(validateReview({ status: "confirmed", doc_status: "final" })).toEqual({ ok: false, reason: "label_not_published:exec.status" });
+    if (hasField("exec", "status")) expect(validateReview({ status: "confirmed", doc_status: "final", stage: "draft" })).toEqual({ ok: false, reason: "stage_or_status" });
     expect(validateReview({ status: "confirmed", doc_status: "nonsense" })).toEqual({ ok: false, reason: "doc_status" });
     expect(validateReview({ status: "confirmed" })).toMatchObject({ ok: true, value: { docStatus: null } });
     const m = buildReviewMods({ status: "confirmed", stage: null, executedDate: null, note: null, docStatus: null, reviewerEmail: "a@b.c" });
     expect(m.labels).toEqual(["review"]);                         // no Status, no Stage: only Catalog Review is written
+  });
+});
+
+describe("CAT-WO-02 · Status is only for non-executable documents (server, CISO review)", () => {
+  const session = { v: 1, email: "ryan@allegiscapital.com", sub: "1", hd: "allegiscapital.com", at: "x", scopes: [], exp: Math.floor(Date.now() / 1000) + 600 } as never;
+  const dbWith = (row: Record<string, unknown>) => ({ rows: async () => [row], exec: async () => 1 }) as never;
+  it("refuses doc_status on an executable document before any Drive call; allows it in the Status-unknown lane", async () => {
+    if (!hasField("exec", "status")) return;            // before publish the earlier label_not_published refusal applies
+    let called = false;
+    const f = async () => { called = true; return new Response("{}", { status: 200 }); };
+    const r = await reviewWrite({ file_id: "AAAAAAAAAAAAAAAAAAAAA1", status: "confirmed", doc_status: "final" },
+      { session, db: dbWith({ document_id: "1", queue_reason: "stage_unknown", requires_execution: true }), fetch: f });
+    expect(r).toMatchObject({ status: 400, body: { reason: "status_not_for_executable" } });
+    expect(called).toBe(false);
+    const ok = await reviewWrite({ file_id: "AAAAAAAAAAAAAAAAAAAAA1", status: "confirmed", doc_status: "final" },
+      { session, db: dbWith({ document_id: "1", queue_reason: "status_unknown", requires_execution: null }), fetch: f });
+    expect(ok.status).toBe(200);
+    expect(called).toBe(true);
   });
 });

@@ -12,7 +12,7 @@ const S = schema as unknown as Record<string, LabelDef>;
 
 /** Who sets a field. "review" = the Review queue writes it today; "part2" = machine-set until CAT-WO-02 Part 2 (R-023) makes it app-editable; "machine" = catalog rules / labelling run only; "never" = Handling. */
 export type Editable = "review" | "machine" | "never" | "part2" | "app";
-interface FieldMeta { title: string; about: string; editable: Editable; vocab?: VocabList | "entity" | "portco" }
+interface FieldMeta { title: string; about: string; editable: Editable; vocab?: VocabList | "entity" | "portco" | "party" }
 
 export const LABEL_ABOUT: Record<string, string> = {
   doc: "What the document is and who it belongs to.",
@@ -38,6 +38,12 @@ export const FIELD_META: Record<string, Record<string, FieldMeta>> = {
     stage: { title: "Stage", about: "How far the signing has got.", editable: "review", vocab: "stage" },
     executed_date: { title: "Executed date", about: "The date the last party signed.", editable: "review" },
     evidence: { title: "Evidence", about: "What shows the document was signed.", editable: "machine", vocab: "evidence" },
+    status: { title: "Status", about: "Publishing progress for everything that isn't signed: financial statements, reports, letters, K-1s, PCAPs, workpapers. A fully executed agreement is Final.", editable: "part2", vocab: "status" },
+    issued_date: { title: "Issued date", about: "The date the document was issued.", editable: "part2" },
+  },
+  parties: {
+    issuing_entity: { title: "Issuing entity", about: "Who issued the document: an Allegis entity, a portfolio company, or EXTERNAL.", editable: "part2", vocab: "party" },
+    receiving_entities: { title: "Receiving entity", about: "Who received it: Allegis entities, LP (an outside limited partner) or EXTERNAL.", editable: "part2", vocab: "party" },
   },
   handling: {
     tier: { title: "Tier", about: "Normal, Restricted, or Secret (never shown anywhere).", editable: "never", vocab: "tier" },
@@ -62,12 +68,12 @@ export interface PanelLabel { key: string; title: string; about: string; fields:
 const APP_EDITABLE = new Set(["doc.kind", "doc.entity", "doc.portco", "doc.fiscal_year", "doc.period", "doc.effective_date",
   "exec.stage", "exec.executed_date", "exec.status", "exec.issued_date", "parties.issuing_entity", "parties.receiving_entities"]);
 
-const MULTI = new Set(["doc.entity", "doc.portco", "handling.contains"]);
+const MULTI = new Set(["doc.entity", "doc.portco", "handling.contains", "parties.receiving_entities"]);
 
 export function buildLabelsPanel(names: { entity: Map<string, string>; portco: Map<string, string> }): PanelLabel[] {
   const published: PanelLabel[] = Object.entries(S).map(([lk, L]) => ({
     key: lk,
-    title: lk === "exec" && !L.fields.status ? `${L.title} (to be renamed Status & Execution)` : L.title,
+    title: lk === "parties" ? "Parties (L11)" : lk === "exec" && !L.fields.status ? `${L.title} (to be renamed Status & Execution)` : L.title,
     about: LABEL_ABOUT[lk] ?? "",
     fields: Object.entries(L.fields).map(([fk, F]) => {
       const m = FIELD_META[lk]?.[fk] ?? { title: fk, about: "", editable: "machine" as Editable };
@@ -75,6 +81,7 @@ export function buildLabelsPanel(names: { entity: Map<string, string>; portco: M
       const meaning = (code: string) =>
         m.vocab === "entity" ? names.entity.get(code) ?? code
         : m.vocab === "portco" ? names.portco.get(code) ?? code
+        : m.vocab === "party" ? names.entity.get(code) ?? (names.portco.has(code) ? `${names.portco.get(code)} (portfolio company)` : (VOCAB.party_extra as Record<string, string>)[code] ?? code)
         : m.vocab ? ((VOCAB[m.vocab] as Record<string, string>)[code] ?? code) : code;
       return {
         key: fk, title: m.title, about: m.about, type: TYPE_WORDS[F.type] ?? F.type, multi: MULTI.has(`${lk}.${fk}`),
@@ -105,5 +112,8 @@ export function buildLabelsPanel(names: { entity: Map<string, string>; portco: M
       ],
     });
   }
+  // the panel order stays Allegis Document, (Status &) Execution, Parties, Handling, Catalog Review once published too
+  const i = published.findIndex((l) => l.key === "parties");
+  if (i > 2) published.splice(2, 0, ...published.splice(i, 1));
   return published;
 }
