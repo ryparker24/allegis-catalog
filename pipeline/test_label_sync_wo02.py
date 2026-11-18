@@ -56,6 +56,26 @@ check("G-E4c a Confirmed file is never overwritten (all its valued fields are pe
 w, s = ls.plan_resync(cl.expected(row(kind="receipt"), schema), live_from(machine), machine, ["kind"], FIELDS)
 check("G-E4d stored person ownership persists across runs", w == [] and s == ["kind"], f"write={w} skip={s}")
 
+# ---- a person CLEARED a value (app 'blank' / Drive): owned, so the re-sync doesn't put the machine value back
+live = live_from(machine, entities=[], review_status="confirmed", reviewed_by_set=True)
+w, s = ls.plan_resync(machine, live, machine, [], FIELDS)
+check("G-E4e a value a person cleared is not re-filled by the re-sync", "entities" not in w and "entities" in s, f"write={w} skip={s}")
+live = live_from(machine, entities=[])          # cleared in Drive, no review mark
+w, s = ls.plan_resync(machine, live, machine, [], FIELDS)
+check("G-E4f ... also when cleared directly in Drive (no review mark)", w == [] and s == ["entities"], f"write={w} skip={s}")
+
+# ---- Catalog Review = Wrong protects the file's values too (the person said the catalog is wrong)
+live = live_from(machine, review_status="wrong", reviewed_by_set=True)
+w, s = ls.plan_resync(cl.expected(row(kind="receipt"), schema), live, machine, [], FIELDS)
+check("G-E4g a file marked Wrong is not re-synced over", w == [] and s == ["kind"], f"write={w} skip={s}")
+
+# ---- first sight: machine seeded from the LIVE labels, so a catalog value that changed since the bulk write is
+#      NOT taken as a person's edit (it is simply re-synced)
+seed = {f: live_from(machine)[f] for f in FIELDS}
+check("G-R5 first read-back: a stale catalog value is not 'person-owned'", ls.person_owned(live_from(machine), seed, FIELDS) == [])
+w, s = ls.plan_resync(cl.expected(row(kind="receipt"), schema), live_from(machine), seed, [], FIELDS)
+check("G-R6 ... and the re-sync updates it", w == ["kind"] and s == [], f"write={w} skip={s}")
+
 # ---- Handling is never in a re-sync write
 mods = ls.mods_for(["kind", "tier", "contains"], now, schema)
 ids = {m["labelId"] for m in mods}

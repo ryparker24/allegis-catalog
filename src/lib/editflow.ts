@@ -12,8 +12,8 @@ const ACCESS_FIELDS = "id,capabilities/canModifyLabels,labelInfo";
  * The user's live access check (R-020 condition 1) before any write: the file must open for them, they must be
  * allowed to change its labels, and its live Handling tier must not be secret. Returns the ids that pass.
  */
-export async function liveWritable(token: string, ids: string[], f?: FetchLike): Promise<{ ok: string[]; noAccess: string[]; checkFailed: string[]; expired: boolean }> {
-  const out = { ok: [] as string[], noAccess: [] as string[], checkFailed: [] as string[], expired: false };
+export async function liveWritable(token: string, ids: string[], f?: FetchLike): Promise<{ ok: string[]; noAccess: string[]; checkFailed: string[]; expired: boolean; stage: Map<string, string | null> }> {
+  const out = { ok: [] as string[], noAccess: [] as string[], checkFailed: [] as string[], expired: false, stage: new Map<string, string | null>() };
   for (let i = 0; i < ids.length; i += 100) {
     const chunk = ids.slice(i, i + 100);
     const m = await driveBatchGet(token, chunk, { fields: ACCESS_FIELDS, includeLabels: INCLUDE_LABELS }, f);
@@ -25,7 +25,7 @@ export async function liveWritable(token: string, ids: string[], f?: FetchLike):
         const caps = it.body.capabilities as { canModifyLabels?: boolean } | undefined;
         const live = decodeLabels(it.body.labelInfo as never);
         if (caps?.canModifyLabels === false || live.tier === "secret") out.noAccess.push(id);
-        else out.ok.push(id);
+        else { out.ok.push(id); out.stage.set(id, live.stage); }
         continue;
       }
       if (isTransient(it)) out.checkFailed.push(id); else out.noAccess.push(id);
@@ -34,14 +34,15 @@ export async function liveWritable(token: string, ids: string[], f?: FetchLike):
   return out;
 }
 
-async function recordEvents(D: Db, rows: { file_id: string; document_id: string | null }[], email: string, e: EditSet, labels: string[], source: string) {
+/** status: 'confirmed' for a single edit (the person reviewed the file), 'edited' for bulk (a field changed, file not reviewed). */
+async function recordEvents(D: Db, rows: { file_id: string; document_id: string | null }[], email: string, e: EditSet, labels: string[], source: string, status: "confirmed" | "edited" = "confirmed") {
   if (!rows.length) return;
   // one multi-row insert (codes only in edits)
   const params: unknown[] = [];
   const vals = rows.map((r) => {
-    params.push(r.file_id, r.document_id, email.toLowerCase(), e.stage ?? null, e.executed_date ?? null, labels, source, JSON.stringify(editRecord(e)));
-    const b = params.length - 8;
-    return `($${b + 1}, $${b + 2}, $${b + 3}, 'confirmed', $${b + 4}, $${b + 5}::date, NULL, NULL, $${b + 6}::text[], $${b + 7}, $${b + 8}::jsonb)`;
+    params.push(r.file_id, r.document_id, email.toLowerCase(), status, e.stage ?? null, e.executed_date ?? null, labels, source, JSON.stringify(editRecord(e)));
+    const b = params.length - 9;
+    return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}::date, NULL, NULL, $${b + 7}::text[], $${b + 8}, $${b + 9}::jsonb)`;
   });
   await D.exec(
     `INSERT INTO app.review_event (file_id, document_id, reviewer_email, status, stage, executed_date, note, queue_reason, labels_written, source, edits)
@@ -56,10 +57,14 @@ export async function editOne(body: unknown, ctx: { session: Session; db: Db; fe
   const v = validateEdit(o.set);
   if (!v.ok) return { status: 400, body: { error: "bad_input", reason: v.reason } };
   const q = await ctx.db.rows<{ document_id: string | null }>("SELECT document_id::text AS document_id FROM app.v_find_x WHERE file_id = $1", [fileId]);
-  if (!q.length) return { status: 404, body: { error: "not_in_catalog_scope" } };
+  if (!q.length) return { status: 403, body: { error: "no_access" } }; // one answer for "not in scope" and "can't open" (CISO review)
   const acc = await liveWritable(ctx.session.at, [fileId], ctx.fetch);
   if (acc.expired) return { status: 401, body: { error: "signin_required", login: "/api/auth/login" } };
   if (!acc.ok.length) return { status: 403, body: { error: acc.noAccess.length ? "no_access" : "access_check_failed" } };
+  // an executed date alone is fine when the file is ALREADY fully executed (live), or when this edit sets that stage
+  if (v.value.executed_date && v.value.stage !== "fully_executed" && acc.stage.get(fileId) !== "fully_executed") {
+    return { status: 400, body: { error: "bad_input", reason: "executed_date_needs_fully_executed" } };
+  }
   const { labelModifications, labels } = buildEditMods(v.value, ctx.session.email);
   const d = await modifyLabels(ctx.session.at, fileId, labelModifications, ctx.fetch);
   if (d.status !== 200) {
@@ -96,13 +101,16 @@ export async function editBulk(body: unknown, ctx: { session: Session; db: Db; f
   }
   const acc = await liveWritable(ctx.session.at, inScope.map((r) => r.file_id), ctx.fetch);
   if (acc.expired) return { status: 401, body: { error: "signin_required", login: "/api/auth/login" } };
-  const { labelModifications, labels } = buildEditMods(v.value, ctx.session.email);
-  const res = await bulkWrite(ctx.session.at, acc.ok, labelModifications, { fetch: ctx.fetch, sleep: ctx.sleep });
-  const doneSet = new Set(res.done);
+  const { labelModifications, labels } = buildEditMods(v.value, ctx.session.email, { confirm: false });
+  const docOf = new Map(inScope.map((r) => [r.file_id, r.document_id]));
   let eventsFailed = false;
-  try {
-    await recordEvents(ctx.db, inScope.filter((r) => doneSet.has(r.file_id)), ctx.session.email, v.value, labels, "find_bulk");
-  } catch { eventsFailed = true; }
+  const res = await bulkWrite(ctx.session.at, acc.ok, labelModifications, {
+    fetch: ctx.fetch, sleep: ctx.sleep,
+    onBatch: async (done) => {
+      try { await recordEvents(ctx.db, done.map((id) => ({ file_id: id, document_id: docOf.get(id) ?? null })), ctx.session.email, v.value, labels, "find_bulk", "edited"); }
+      catch { eventsFailed = true; logEvent("edit_bulk", { outcome: "event_insert_failed", count: done.length }); }
+    },
+  });
   const report = {
     done: res.done.length,
     skipped_no_access: acc.noAccess.length + res.skippedNoAccess.length,

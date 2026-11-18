@@ -61,7 +61,9 @@ describe("G-E1 test_edit_writes_only_allowed_labels", () => {
     for (const k of ["tier", "Handling", "contains", "lp_pii", "pii_lp"]) expect(validateEdit({ kind: "k1", [k]: "normal" })).toEqual({ ok: false, reason: "handling_not_editable" });
     expect(validateEdit({ workstream: "tax" })).toMatchObject({ ok: false, reason: "field_not_editable:workstream" });
     expect(validateEdit({ kind: "not_a_kind" })).toMatchObject({ ok: false, reason: "bad_value:kind" });
-    expect(validateEdit({ executed_date: "2025-01-01" })).toMatchObject({ ok: false, reason: "executed_date_needs_fully_executed" });
+    expect(validateEdit({ stage: "draft", executed_date: "2025-01-01" })).toMatchObject({ ok: false, reason: "executed_date_needs_fully_executed" });
+    expect(validateEdit({ kind: "toString" })).toMatchObject({ ok: false, reason: "bad_value:kind" });        // CISO: inherited props
+    expect(validateEdit({ entities: ["__proto__"] })).toMatchObject({ ok: false, reason: "bad_value:entities" });
   });
   it("Parties / Status are refused until those labels are published (never written to a field that doesn't exist)", () => {
     if (!("status" in SCHEMA.exec.fields)) expect(validateEdit({ status: "final" })).toEqual({ ok: false, reason: "label_not_published:exec.status" });
@@ -88,6 +90,35 @@ describe("G-E1 test_edit_writes_only_allowed_labels", () => {
     const r = await editOne({ file_id: F1, set: { kind: "invoice" } }, { session, db: D, fetch: d.f });
     expect(r).toEqual({ status: 403, body: { error: "no_access" } });
     expect(d.calls.some((c) => c.url.includes("modifyLabels"))).toBe(false); expect(execs.length).toBe(0);
+  });
+});
+
+describe("review fixes (Part 2 coder + CISO)", () => {
+  it("executed date alone: accepted when the file is ALREADY fully executed live, refused otherwise", async () => {
+    const ok = drive({}); const { D } = fakeDb([F1]);
+    // stub: live stage fully_executed via the access-check batch
+    const f = async (url: string, init?: RequestInit) => {
+      if (url.includes("/batch/drive/v3")) {
+        const ex = { labels: [{ id: LABEL_IDS.exec, fields: { [SCHEMA.exec.fields.stage.field_id]: { selection: [SCHEMA.exec.fields.stage.choices!.fully_executed] } } }] };
+        return batchResponse([{ status: 200, body: { id: F1, capabilities: { canModifyLabels: true }, labelInfo: ex } }]);
+      }
+      return ok.f(url, init);
+    };
+    expect((await editOne({ file_id: F1, set: { executed_date: "2024-06-30" } }, { session, db: D, fetch: f })).status).toBe(200);
+    const r = await editOne({ file_id: F1, set: { executed_date: "2024-06-30" } }, { session, db: D, fetch: drive({}).f });
+    expect(r).toEqual({ status: 400, body: { error: "bad_input", reason: "executed_date_needs_fully_executed" } });
+  });
+  it("a file outside the catalog scope gets the same answer as one the user can't open", async () => {
+    const r = await editOne({ file_id: F1, set: { kind: "invoice" } }, { session, db: fakeDb([]).D, fetch: drive({}).f });
+    expect(r).toEqual({ status: 403, body: { error: "no_access" } });
+  });
+  it("bulk does NOT stamp Catalog Review Confirmed; its audit rows are 'edited', written per batch", async () => {
+    const d = drive({}); const { D, execs } = fakeDb([F1, F2]);
+    await editBulk({ file_ids: [F1, F2], set: { kind: "invoice" }, confirm: true }, { session, db: D, fetch: d.f, sleep: async () => {} });
+    const body = d.calls.find((c) => c.url.includes("modifyLabels"))!.body;
+    expect(body).not.toContain(LABEL_IDS.review);
+    expect(execs[0].params).toContain("edited");
+    expect(execs[0].params).not.toContain("confirmed");
   });
 });
 

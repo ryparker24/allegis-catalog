@@ -70,7 +70,7 @@ class Schema:
     def decode(self, label_info):
         """labelInfo -> {field: value} plus review_status / reviewed_by_set / has_doc_label."""
         out = {f: ([] if FIELDS[f][2] == "many" else None) for f in FIELDS}
-        out.update(review_status=None, reviewed_by_set=False, has_doc_label=False)
+        out.update(review_status=None, reviewed_by_set=False, has_doc_label=False, unknown_choices=0)
         for L in (label_info or {}).get("labels", []) or []:
             lk = self.by_label_id.get(L.get("id"))
             if not lk:
@@ -82,7 +82,9 @@ class Schema:
                 if not k:
                     continue
                 _, fk = k
-                sel = [self.choice_code.get((lk, fk, c), "?" + c) for c in (fv.get("selection") or [])]
+                raw = fv.get("selection") or []
+                sel = [self.choice_code[(lk, fk, c)] for c in raw if (lk, fk, c) in self.choice_code]
+                out["unknown_choices"] += len(raw) - len(sel)   # a choice added in Drive admin after our schema: skipped, counted
                 if lk == "review":
                     if fk == "status": out["review_status"] = sel[0] if sel else None
                     if fk == "reviewed_by": out["reviewed_by_set"] = bool(fv.get("user"))
@@ -145,6 +147,7 @@ def read_labels(svc, ids, include_labels, batch=100, on_progress=None, on_item=N
     With on_item(file_id, result) each result is handed over as its batch completes and NOT kept (memory stays
     flat on a full ~60k-file read-back); the return value is then empty."""
     out, todo, done = {}, list(ids), 0
+    tries = {}
     while todo:
         chunk, todo = todo[:batch], todo[batch:]
         retry = []
@@ -155,8 +158,9 @@ def read_labels(svc, ids, include_labels, batch=100, on_progress=None, on_item=N
                 out[fid] = {"http": 200, "labelInfo": resp.get("labelInfo")}
                 return
             st = getattr(exc, "status_code", 0) or getattr(getattr(exc, "resp", None), "status", 0)
-            if st in (429, 500, 502, 503) or (st == 403 and "rate" in str(exc).lower()):
-                retry.append(fid)
+            if (st in (429, 500, 502, 503) or (st == 403 and "rate" in str(exc).lower())) and tries.get(fid, 0) < 5:
+                tries[fid] = tries.get(fid, 0) + 1
+                if fid not in retry: retry.append(fid)
             else:
                 out[fid] = {"http": st or 0, "labelInfo": None}
 

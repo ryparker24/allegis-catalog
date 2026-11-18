@@ -33,14 +33,13 @@ CONFIRM_COL = {
 
 # ------------------------------------------------------------------ the rule (pure; unit-tested)
 def person_owned(live, machine, schema_fields):
-    """Fields a person owns on one file. Catalog Review = Confirmed (with Reviewed by) -> every field that has a
-    live value; otherwise -> fields whose live value differs from the last machine write."""
+    """Fields a person owns on one file: fields whose live value differs from the last machine write (a person set
+    OR cleared them), plus - when Catalog Review = Confirmed / Wrong with Reviewed by - every field with a live value."""
     fields = [f for f in cl.PERSON_FIELDS if f in schema_fields]
-    if live.get("review_status") == "confirmed" and live.get("reviewed_by_set"):
-        return sorted(f for f in fields if cl.norm(live.get(f)) != "")
-    if machine is None:
-        return []
-    return sorted(cl.diff(live, machine, fields))
+    owned = set(cl.diff(live, machine, fields)) if machine is not None else set()
+    if live.get("review_status") in ("confirmed", "wrong") and live.get("reviewed_by_set"):
+        owned |= {f for f in fields if cl.norm(live.get(f)) != ""}
+    return sorted(owned)
 
 
 def plan_resync(expected, live, machine, prior_person, schema_fields):
@@ -122,16 +121,16 @@ def report_line(mode, rep, apply):
 
 
 # ------------------------------------------------------------------ 7.1 read-back
-def readback(conn, svc, schema, apply=False, ids=None, log=print):
+def readback(connect, svc, schema, apply=False, ids=None, log=print):
+    """connect(): a NEW DB connection. The Drive read takes many minutes, so the write phase opens its own."""
     fields = schema.active_fields()
     rep = {"read": 0, "confirmed_by_person": 0, "resynced": 0, "skipped_person": 0, "errors": 0, "by_field": {}}
-    with conn.cursor() as cur:
+    with connect() as conn, conn.cursor() as cur:
         ids = ids or scope_ids(cur)
         state = load_state(cur, ids)
         rows = {}
         for i in range(0, len(ids), 5000):
             rows.update(cl.catalog_rows(cur, ids[i:i + 5000]))
-    conn.commit()
     by_field = collections.Counter()
     labelled, unlabelled, upd_state, confirms = [], [], [], []
 
@@ -142,21 +141,26 @@ def readback(conn, svc, schema, apply=False, ids=None, log=print):
             rep["errors"] += 1; return
         rep["read"] += 1
         d = schema.decode(L["labelInfo"])
-        if not d["has_doc_label"]:
-            unlabelled.append(fid); return
+        rep["unknown_choices"] = rep.get("unknown_choices", 0) + d["unknown_choices"]
+        if not d["has_doc_label"] or d["tier"] == "secret":
+            unlabelled.append(fid); return     # secret tier (R-010): out of the app's labelled set, never confirmed
         labelled.append(fid)
         st = state.get(fid) or {}
-        # first read-back: the machine snapshot is the catalog's values (unchanged since the bulk write - item 0.4)
-        machine = st.get("machine") or cl.expected(rows.get(fid, {}), schema)
+        live_codes = {k: d[k] for k in fields} | {"review_status": d["review_status"], "reviewed_by_set": d["reviewed_by_set"]}
+        # first sight of a file: its live labels ARE the machine's bulk write (item 0.3: 0 drift), so a catalog value
+        # that changed since is NOT mistaken for a person's edit (coder review)
+        machine = st.get("machine") or {k: d[k] for k in fields}
         owned = person_owned(d, machine, fields)
-        new = [f for f in owned if f not in (st.get("person_fields") or [])]
+        prior = set(st.get("person_fields") or [])
+        prev_live = st.get("live") or {}
+        # newly owned, or owned and changed again since the last read (a second edit is captured too)
+        new = [f for f in owned if f not in prior or cl.norm(d.get(f)) != cl.norm(prev_live.get(f))]
         if new:
             rep["confirmed_by_person"] += 1
             by_field.update(new)
             doc = (rows.get(fid) or {}).get("document_id")
             if doc is not None:
                 confirms += confirm_updates(doc, new, d)
-        live_codes = {k: d[k] for k in fields} | {"review_status": d["review_status"], "reviewed_by_set": d["reviewed_by_set"]}
         upd_state.append((fid, json.dumps(machine, default=str), json.dumps(live_codes, default=str), d["review_status"], d["reviewed_by_set"],
                           sorted(set(st.get("person_fields") or []) | set(owned))))
 
@@ -166,7 +170,7 @@ def readback(conn, svc, schema, apply=False, ids=None, log=print):
     rep["by_field"] = dict(by_field)
     rep["notes"] = f"labelled {len(labelled):,}; read but without the Allegis Document label {len(unlabelled):,}"
     if apply:
-        with conn.cursor() as cur:
+        with connect() as conn, conn.cursor() as cur:
             rid = new_run(cur, "readback", True)
             cur.executemany("""INSERT INTO ops.label_state (file_id, machine, machine_at, live, live_at, review_status, reviewed_by_set, person_fields)
                                VALUES (%s, %s::jsonb, now(), %s::jsonb, now(), %s, %s, %s)
@@ -181,16 +185,16 @@ def readback(conn, svc, schema, apply=False, ids=None, log=print):
             if unlabelled:
                 cur.execute("DELETE FROM app.labelled_file WHERE file_id = ANY(%s)", (unlabelled,))
             finish_run(cur, rid, rep)
-        conn.commit()
     log(report_line("readback", rep, apply))
     log(f"  by field (newly person-confirmed): {rep['by_field']}  · {rep['notes']}")
     return rep
 
 
 # ------------------------------------------------------------------ 7.2 re-sync
-def resync(conn, svc, schema, apply=False, only=None, log=print, sleep=time.sleep):
+def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.sleep):
     fields = schema.active_fields()
-    rep = {"read": 0, "confirmed_by_person": 0, "resynced": 0, "skipped_person": 0, "errors": 0, "by_field": {}}
+    rep = {"read": 0, "confirmed_by_person": 0, "resynced": 0, "skipped_person": 0, "errors": 0, "by_field": {}, "no_state": 0}
+    conn = connect()
     with conn.cursor() as cur:
         if only:
             ids = list(only)
@@ -198,24 +202,40 @@ def resync(conn, svc, schema, apply=False, only=None, log=print, sleep=time.slee
             cur.execute("SELECT file_id FROM app.labelled_file ORDER BY 1")
             ids = [r[0] for r in cur.fetchall()]
         state = load_state(cur, ids)
+        if not state:
+            conn.close()
+            raise SystemExit("REFUSED: no ops.label_state for these files - run `readback --apply` first (the re-sync needs the machine snapshot).")
         rows = {}
         for i in range(0, len(ids), 5000):
             rows.update(cl.catalog_rows(cur, ids[i:i + 5000]))
     conn.commit()
+    conn.close()          # the Drive read is long: reconnect for the writes
     # read live labels right before writing, so a person's edit since the last read-back is still respected
     plans, skipped_by_field, write_by_field = [], collections.Counter(), collections.Counter()
+
+    def plan_one(fid, L):
+        """-> (write fields, skip fields, expected) or None when the file is not a re-sync candidate."""
+        if L["http"] != 200:
+            return None
+        d = schema.decode(L["labelInfo"])
+        if not d["has_doc_label"] or d["tier"] == "secret":
+            return None                   # not labelled (bulk labeller's job) / secret tier: never written
+        st = state.get(fid)
+        if not st or not st.get("machine"):
+            return "no_state"             # never seen by a read-back: nothing known about who set what -> not touched
+        e = cl.expected(rows.get(fid, {}), schema)
+        write, skip = plan_resync(e, d, st["machine"], st.get("person_fields") or [], fields)
+        return write, skip, e
 
     def one(fid, L):
         if L["http"] != 200:
             rep["errors"] += L["http"] != 404; return
         rep["read"] += 1
-        d = schema.decode(L["labelInfo"])
-        if not d["has_doc_label"]:
-            return                        # not labelled: the bulk labeller's job, not the re-sync's
-        st = state.get(fid) or {}
-        e = cl.expected(rows.get(fid, {}), schema)
-        machine = st.get("machine") or e
-        write, skip = plan_resync(e, d, machine, st.get("person_fields") or [], fields)
+        p = plan_one(fid, L)
+        if p == "no_state":
+            rep["no_state"] += 1; return
+        if not p: return
+        write, skip, e = p
         if skip:
             rep["skipped_person"] += 1; skipped_by_field.update(skip)
         if write:
@@ -230,13 +250,28 @@ def resync(conn, svc, schema, apply=False, only=None, log=print, sleep=time.slee
         rep["notes"] = f"would re-sync {len(plans):,} files"
         log(report_line("resync", rep, apply)); log(f"  {rep['notes']}; by field: {rep['by_field']}")
         return rep
+    conn = connect()
     with conn.cursor() as cur:
         rid = new_run(cur, "resync", True)
     conn.commit()
     sampled = changed_mtime = 0
     queue = list(plans)
+    tries = collections.Counter()   # retry cap per file (coder review): a persistent 429 can't loop forever
     while queue:
         chunk, queue = queue[:BATCH], queue[BATCH:]
+        # re-read THIS batch's labels just before writing and re-plan: an edit made since the first read wins
+        fresh = cl.read_labels(svc, [c[0] for c in chunk], schema.include_labels())
+        replanned = []
+        for fid, _w, _e in chunk:
+            p = plan_one(fid, fresh.get(fid) or {"http": 0})
+            if p == "no_state": continue
+            if not p or not p[0]:
+                if p and p[1]: rep["skipped_person"] += 1; skipped_by_field.update(p[1])
+                continue
+            replanned.append((fid, p[0], p[2]))
+        chunk = replanned
+        if not chunk:
+            continue
         smp = chunk[0][0]
         before = svc.files().get(fileId=smp, fields="modifiedTime", supportsAllDrives=True).execute().get("modifiedTime")
         retry, ok = [], []
@@ -246,8 +281,9 @@ def resync(conn, svc, schema, apply=False, only=None, log=print, sleep=time.slee
             if exc is None:
                 ok.append(item); return
             st = getattr(getattr(exc, "resp", None), "status", 0) or getattr(exc, "status_code", 0)
-            if st in (429, 500, 502, 503) or (st == 403 and "rate" in str(exc).lower()):
-                retry.append(item)
+            if (st in (429, 500, 502, 503) or (st == 403 and "rate" in str(exc).lower())) and tries[item[0]] < 4:
+                tries[item[0]] += 1
+                if item not in retry: retry.append(item)
             else:
                 rep["errors"] += 1
 
@@ -268,10 +304,13 @@ def resync(conn, svc, schema, apply=False, only=None, log=print, sleep=time.slee
             queue = retry + queue; sleep(5 + random.random() * 5)
         else:
             sleep(1.0)
-    rep["notes"] = f"modifiedTime changed on {changed_mtime} of {sampled} sampled files"
+    rep["notes"] = f"modifiedTime changed on {changed_mtime} of {sampled} sampled files; never read back (not touched) {rep['no_state']:,}"
+    rep["by_field"]["mtime_sampled"] = sampled
+    rep["by_field"]["mtime_changed"] = changed_mtime
     with conn.cursor() as cur:
         finish_run(cur, rid, rep)
     conn.commit()
+    conn.close()
     log(report_line("resync", rep, apply)); log(f"  {rep['notes']}; by field: {rep['by_field']}")
     return rep
 
@@ -288,11 +327,14 @@ def main():
     schema = cl.Schema(cl.load_schema())
     scopes = ["https://www.googleapis.com/auth/drive.metadata"] if a.mode == "resync" else ["https://www.googleapis.com/auth/drive.readonly"]
     svc = cl.drive_service(a.token, scopes)
-    with psycopg.connect(open(a.db_url_file).read().strip()) as conn:
-        if a.mode == "readback":
-            readback(conn, svc, schema, apply=a.apply, ids=a.only or None)
-        else:
-            resync(conn, svc, schema, apply=a.apply, only=a.only)
+    url = open(a.db_url_file).read().strip()
+
+    def connect():
+        return psycopg.connect(url)
+    if a.mode == "readback":
+        readback(connect, svc, schema, apply=a.apply, ids=a.only or None)
+    else:
+        resync(connect, svc, schema, apply=a.apply, only=a.only)
 
 
 if __name__ == "__main__":

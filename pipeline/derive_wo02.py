@@ -8,21 +8,22 @@ Paths and names are used in memory only; nothing here prints or stores them.
 import re
 
 # A regex's \b treats "_" and digits as word characters, so it misses 'Statement_2023', 'Draft_v2', 'FINAL1'.
-# In the patterns below '<' / '>' mean the start / end of a WORD by letters: no letter before / after.
+# In the patterns below '‹' / '›' mean the start / end of a WORD by letters: no letter before / after.
+# (Not '<' / '>': those are regex syntax in '(?<!', '(?<=', '(?P<name>'.)
 LB, LE = r"(?<![A-Za-z])", r"(?![A-Za-z])"
 
 
 def W(rx, flags=re.I):
-    """Compile a pattern written with '<' (word start) and '>' (word end) as letter boundaries."""
-    return re.compile(rx.replace("<", LB).replace(">", LE), flags)
+    """Compile a pattern written with '‹' (word start) and '›' (word end) as letter boundaries."""
+    return re.compile(rx.replace("‹", LB).replace("›", LE), flags)
 
 
 # ------------------------------------------------------------------ R-021 · K-1 parties
-K1_CONTAINER = W(r"(<k-?1'?s?>|<1s>|<tax returns?>|<investor packages?>|<k1s>)")
-RECEIVED_MARK = W(r"(<investments? in>|<received>|<investee|<from (the )?fund)")
-GP_MARK = W(r"(<gp entities>|^gps?>|<gps management|<general partners?>)")
-MGMT_MARK = W(r"(^mgmt co>|<management compan)")
-PBC_MARK = W(r"(<pbc>|<estimates?>)")
+K1_CONTAINER = W(r"(‹k-?1'?s?›|‹1s›|‹tax returns?›|‹investor packages?›|‹k1s›)")
+RECEIVED_MARK = W(r"(‹investments? in›|‹received›|‹investee|‹from (the )?fund)")
+GP_MARK = W(r"(‹gp entities›|^gps?›|‹gps management|‹general partners?›)")
+MGMT_MARK = W(r"(^mgmt co›|‹management compan)")
+PBC_MARK = W(r"(‹pbc›|‹estimates?›)")
 
 ISSUER_TYPES = {"fund", "spv"}
 
@@ -54,7 +55,7 @@ def k1_parties(segs, ents, ent_type, k1_in_folder, entity_codes):
             return iss, recv, "K1-R1-mgmtco-received"
         return None, [], None
     # K1-R2: a GP's K-1 from its fund ("GP entities" / "GPs" folders, or a GP-only entity on the file)
-    if (any(GP_MARK.search(s) for s in path) or (gps and not funds)) and not PBC_MARK.search(j):
+    if (any(GP_MARK.search(s) for s in path) or (gps and not funds and k1_in_folder < 3)) and not PBC_MARK.search(j):
         if len(gps) == 1:
             iss = funds[0] if len(funds) == 1 else gp_fund(gps[0], entity_codes)
             return iss, gps, "K1-R2-gp-received"
@@ -69,17 +70,17 @@ def k1_parties(segs, ents, ent_type, k1_in_folder, entity_codes):
 # ------------------------------------------------------------------ R-022 · Status (publishing lifecycle)
 STATUS_CODES = ["draft", "in_review", "final", "issued", "superseded"]
 NAME_MARKERS = [  # (marker id, pattern on the file NAME, status)
-    ("name:draft", W(r"<draft>"), "draft"),
-    ("name:redline", W(r"(<red-?line(d)?>|<blackline>)"), "in_review"),
-    ("name:vN", W(r"(<v ?\d{1,2}(\.\d+)?(?![0-9])|<rev ?\d+(?![0-9]))"), "in_review"),
-    ("name:final", W(r"<final>"), "final"),
-    ("name:issued", W(r"<issued>"), "issued"),
-    ("name:signed", W(r"(<signed>|<executed>)"), "final"),
+    ("name:draft", W(r"‹draft›"), "draft"),
+    ("name:redline", W(r"(‹red-?line(d)?›|‹blackline›)"), "in_review"),
+    ("name:vN", W(r"((?<![-A-Za-z])v\d{1,2}(\.\d+)?(?![0-9.])|‹ver(sion)? ?\d{1,2}(?![0-9])|‹rev ?\d{1,2}(?![0-9]))"), "in_review"),
+    ("name:final", W(r"‹final›"), "final"),
+    ("name:issued", W(r"‹issued›"), "issued"),
+    ("name:signed", W(r"(‹signed›|‹executed›)"), "final"),
 ]
 FOLDER_MARKERS = [  # (marker id, pattern on a folder SEGMENT, status)
-    ("folder:drafts", W(r"^\W*(\d+[\s._-]+)?drafts?>"), "draft"),
-    ("folder:issued", W(r"^\W*(\d+[\s._-]+)?issued>"), "issued"),
-    ("folder:final", W(r"^\W*(\d+[\s._-]+)?finals?>"), "final"),
+    ("folder:drafts", W(r"^\W*(\d+[\s._-]+)?drafts?›"), "draft"),
+    ("folder:issued", W(r"^\W*(\d+[\s._-]+)?issued›"), "issued"),
+    ("folder:final", W(r"^\W*(\d+[\s._-]+)?finals?›"), "final"),
 ]
 
 
@@ -115,32 +116,32 @@ def status_for(kind, executable, name, segs, stage=None):
 # Each rule: (id, kind it would set, folder-segment pattern or None, name pattern or None, plain-words description).
 # A file matches when every given pattern matches (folder: any segment). First match wins, in this order.
 NOKIND_RULES = [
-    ("NK01", "k1", r"(<k-?1'?s?>|<1s>)", None,
+    ("NK01", "k1", r"(‹k-?1'?s?›|‹1s›)", None,
      "a folder named for K-1s (e.g. '…/<FY> K-1s from PwC/…', '…/Final K-1s/…')"),
-    ("NK02", "invoice", None, r"(<inv(oice)?s?>|<inv ?#?\d)",
+    ("NK02", "invoice", None, r"(‹inv(oice)?s?›|‹inv ?#?\d)",
      "'invoice' / 'inv #' in the name"),
-    ("NK03", "bank_stmt", r"<statements?>", r"(<statements?>|<stmts?>)",
+    ("NK03", "bank_stmt", r"‹statements?›", r"(‹statements?›|‹stmts?›)",
      "'statement' in the name, inside a '…Statements' folder (e.g. '…/Mgmt Co/…/<x> Statements/<FY>/')"),
-    ("NK04", "tax_form", None, r"(1042|1099|8804|8805|<w-?9|<w-?8|<extension>|7004|8868)",
+    ("NK04", "tax_form", None, r"(1042|1099|8804|8805|‹w-?9|‹w-?8|‹extension›|7004|8868)",
      "a tax-form number or 'extension' in the name"),
-    ("NK05", "tax_return", r"<tax returns?>", r"(1065|1120|990|<returns?>)",
+    ("NK05", "tax_return", r"‹tax returns?›", r"(1065|1120|990|‹returns?›)",
      "'1065'/'1120'/'990'/'return' in the name, inside a '…Tax Returns…' folder"),
-    ("NK06", "valuation_memo", None, r"(<valuations?>|409a)",
+    ("NK06", "valuation_memo", None, r"(‹valuations?›|409a)",
      "'valuation' in the name"),
-    ("NK07", "quarterly_report", r"<reports?>", r"<reports?>",
+    ("NK07", "quarterly_report", r"‹reports?›", r"‹reports?›",
      "'report' in the name, inside a '…Reports…' folder"),
-    ("NK08", "receipt", None, r"<receipts?>",
+    ("NK08", "receipt", None, r"‹receipts?›",
      "'receipt' in the name"),
-    ("NK09", "wire_confirmation", None, r"<wires?>",
+    ("NK09", "wire_confirmation", None, r"‹wires?›",
      "'wire' in the name (e.g. '* - Wire *')"),
-    ("NK10", "capital_call_notice", None, r"(<capital call>|<call notice>)",
+    ("NK10", "capital_call_notice", None, r"(‹capital call›|‹call notice›)",
      "'capital call' in the name"),
-    ("NK11", "distribution_notice", None, r"<dist(ribution)? notice>",
+    ("NK11", "distribution_notice", None, r"‹dist(ribution)? notice›",
      "'distribution notice' in the name"),
     ("NK12", "workpaper", r"(<workpapers?>|<pbc>)", None,
      "inside a '…Workpapers…' or '…PBC…' folder"),
 ]
-NOKIND_RULED = {}   # rule id -> True once Ryan approves (CAT-WO-02 item 9); derivation applies only these
+NOKIND_RULED = {}   # rule id -› True once Ryan approves (CAT-WO-02 item 9); derivation applies only these
 _NK = [(rid, kind, W(frx) if frx else None, W(nrx) if nrx else None, d) for rid, kind, frx, nrx, d in NOKIND_RULES]
 
 

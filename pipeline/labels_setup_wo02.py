@@ -64,6 +64,7 @@ def main():
         conn = psycopg.connect(url, options="-c default_transaction_read_only=on")
     else:
         conn = dc.db()
+        conn.execute("SET default_transaction_read_only = on")   # ref lists only; never writes
     with conn, conn.cursor() as cur:
         ents, pcos = ref_lists(cur)
     parties, exec_new = design(ents, pcos, ls.sel, ls.date)

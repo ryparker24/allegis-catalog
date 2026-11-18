@@ -1,7 +1,7 @@
 import { getEnv } from "@/lib/env";
 import { json, requireUser } from "@/lib/guard";
 import { db } from "@/lib/db";
-import { groupQuery, pageQuery, parseSpec, SpecError, type FindSpec } from "@/lib/find";
+import { FIND_VIEW, groupQuery, pageQuery, parseSpec, SpecError, type FindSpec } from "@/lib/find";
 import { driveNameSearch } from "@/lib/google";
 import { liveCheck, type DbRow } from "@/lib/live";
 import { present } from "@/lib/present";
@@ -30,7 +30,7 @@ export async function POST(req: Request) {
   const t0 = Date.now();
   const names = await nameIds(g.session.at, spec);
   if (names.expired) return json({ error: "signin_required", login: "/api/auth/login" }, 401);
-  const q = pageQuery(spec, "app.v_find", { nameIds: names.ids });
+  const q = pageQuery(spec, FIND_VIEW, { nameIds: names.ids });
   const gq = groupQuery(spec, { nameIds: names.ids });
   const D = db(env);
   const [rows, cnt, groups] = await Promise.all([

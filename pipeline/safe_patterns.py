@@ -63,7 +63,7 @@ class Masker:
         self.name_words = set()
         for x in self.lp | self.person:
             for w in re.split(r"[^a-z0-9]+", x):
-                if len(w) > 1 and w not in SAFE_EVEN_IF_LP and w not in GENERIC: self.name_words.add(w)
+                if len(w) > 1 and w not in SAFE_EVEN_IF_LP: self.name_words.add(w)   # checked BEFORE the allow-list
 
     def segment(self, seg):
         """one folder-path segment -> a safe token"""

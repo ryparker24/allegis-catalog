@@ -19,15 +19,27 @@ ALTER TABLE cat.document
     ADD COLUMN IF NOT EXISTS entities_confirmed           text[],
     ADD COLUMN IF NOT EXISTS portcos_confirmed            text[];
 
+-- NOT VALID + VALIDATE: the scan of ~200k rows runs without holding the table's exclusive lock (coder review)
 DO $$ BEGIN
     ALTER TABLE cat.document ADD CONSTRAINT document_status_codes CHECK (
         coalesce(status_auto, 'draft') IN ('draft','in_review','final','issued','superseded') AND
-        coalesce(status_confirmed, 'draft') IN ('draft','in_review','final','issued','superseded'));
+        coalesce(status_confirmed, 'draft') IN ('draft','in_review','final','issued','superseded')) NOT VALID;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- R-021: Parties hold CODES only (entity / portco codes, 'LP', 'EXTERNAL'), never a name (CISO review)
+DO $$ BEGIN
+    ALTER TABLE cat.document ADD CONSTRAINT document_parties_codes CHECK (
+        coalesce(issuing_entity_auto, 'X') ~ '^[A-Za-z0-9()_ -]{1,40}$' AND
+        coalesce(issuing_entity_confirmed, 'X') ~ '^[A-Za-z0-9()_ -]{1,40}$' AND
+        coalesce(array_to_string(receiving_entities_auto, ','), 'X') ~ '^[A-Za-z0-9()_ ,-]{1,400}$' AND
+        coalesce(array_to_string(receiving_entities_confirmed, ','), 'X') ~ '^[A-Za-z0-9()_ ,-]{1,400}$') NOT VALID;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TABLE cat.document VALIDATE CONSTRAINT document_status_codes;
+ALTER TABLE cat.document VALIDATE CONSTRAINT document_parties_codes;
 
 -- ---------------------------------------------------------------- item 7 · label state per file (the read-back's memory)
--- machine = the values the machine last wrote (or, before the first re-sync, what the bulk run wrote: the catalog
--- values, unchanged since - measured in item 0.4). live = what the last read-back saw on the file.
+-- machine = the values the machine last wrote. On first sight of a file it is seeded from the LIVE labels (the bulk
+-- run wrote them; item 0.3 measured 0 drift), so stale catalog values are never mistaken for a person's edit.
+-- live = what the last read-back saw on the file.
 -- person_fields = fields a person owns (Catalog Review = Confirmed, or live differs from the machine write):
 -- the re-sync never overwrites them.
 CREATE TABLE IF NOT EXISTS ops.label_state (
@@ -62,6 +74,10 @@ ALTER TABLE app.review_event ADD COLUMN IF NOT EXISTS edits  jsonb;
 DO $$ BEGIN
     ALTER TABLE app.review_event ADD CONSTRAINT review_event_source CHECK (source IN ('review', 'find_single', 'find_bulk', 'review_edit'));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- A bulk edit is 'edited': a person changed a field but did not review the file, so it must not take the file out
+-- of the Review queue (only 'confirmed' / 'wrong' do; the queue view is updated after the CAT-WO-01.1 rebase).
+ALTER TABLE app.review_event DROP CONSTRAINT IF EXISTS review_event_status_check;
+ALTER TABLE app.review_event ADD CONSTRAINT review_event_status_check CHECK (status IN ('confirmed', 'wrong', 'edited'));
 DO $$ BEGIN
     ALTER TABLE app.review_event ADD CONSTRAINT review_event_edits_size CHECK (edits IS NULL OR octet_length(edits::text) <= 4000);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;

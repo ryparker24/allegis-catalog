@@ -43,7 +43,10 @@ with psycopg.connect(open(a.db_url_file).read().strip()) as conn, conn.cursor() 
         segs_l = [s.lower() for s in (segs or [])[1:]]
         if kind == "k1":
             iss, recv, rule = dw.k1_parties(segs_l, ents or [], ent_type, k1_folder[parent], set(ent_type))
-            parties.append((iss, recv or None, rule, doc)); c[f"parties:{rule or 'unknown'}"] += 1
+            c[f"parties:{rule or 'unknown'}"] += 1
+        else:
+            iss, recv, rule = None, [], None          # no longer a K-1: rule-set parties are cleared
+        parties.append((iss, recv or None, rule, doc))
         st, srule = dw.status_for(kind, bool(req) or kind in executable, name, (segs or [])[1:], stage)
         status.append((st, srule, doc)); c[f"status:{st or '-'}"] += 1
         if kind is None and ruled:
@@ -53,8 +56,13 @@ with psycopg.connect(open(a.db_url_file).read().strip()) as conn, conn.cursor() 
     for k, n in sorted(c.items()): print(f"  {k:<36} {n:>7,}")
     if not a.apply:
         print("DRY RUN: nothing written"); sys.exit(0)
-    cur.executemany("UPDATE cat.document SET issuing_entity_auto=%s, receiving_entities_auto=%s, parties_rule=%s, updated_at=now() WHERE document_id=%s", parties)
-    cur.executemany("UPDATE cat.document SET status_auto=%s, status_rule=%s, updated_at=now() WHERE document_id=%s", status)
+    # write only what changed (no updated_at churn on every run - coder review)
+    cur.executemany("""UPDATE cat.document SET issuing_entity_auto=%s, receiving_entities_auto=%s, parties_rule=%s, updated_at=now()
+                       WHERE document_id=%s AND (issuing_entity_auto, receiving_entities_auto, parties_rule) IS DISTINCT FROM (%s, %s, %s)""",
+                    [(i, r, ru, d, i, r, ru) for i, r, ru, d in parties])
+    cur.executemany("""UPDATE cat.document SET status_auto=%s, status_rule=%s, updated_at=now()
+                       WHERE document_id=%s AND (status_auto, status_rule) IS DISTINCT FROM (%s, %s)""",
+                    [(st, ru, d, st, ru) for st, ru, d in status])
     if kinds:
         cur.executemany("UPDATE cat.document SET kind_auto=%s, updated_at=now() WHERE document_id=%s AND kind_auto IS NULL", kinds)
     conn.commit()

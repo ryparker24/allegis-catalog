@@ -18,8 +18,11 @@ const fileId = arg("--file")!;
 const tokenFile = arg("--token")!;
 const appDbUrl = readFileSync(arg("--app-db-url-file")!, "utf8").trim();
 if (!fileId || !tokenFile || !appDbUrl) throw new Error("usage: --file --token --app-db-url-file");
-// main's endpoint is ep-calm-violet-bdk7m2ar (curly-sunset-06555843 / br-misty-silence-bd0rx01g): refuse it
-if (/ep-calm-violet/.test(appDbUrl)) throw new Error("refusing: that is the MAIN branch endpoint");
+// ALLOW-list (CISO review): only the CAT-WO-02 throwaway branch endpoint (br-red-band-bd2d79yz). Main is
+// ep-calm-violet-bdk7m2ar; anything that isn't the throwaway endpoint is refused, whatever its spelling.
+const THROWAWAY_ENDPOINT = (arg("--allow-endpoint") ?? "ep-billowing-truth-bdj6gzs7").toLowerCase();
+const host = (appDbUrl.toLowerCase().split("@")[1] ?? "").split(/[/:?]/)[0];
+if (!host.startsWith(THROWAWAY_ENDPOINT + ".") && !host.startsWith(THROWAWAY_ENDPOINT + "-pooler.")) throw new Error("refusing: not the throwaway branch endpoint");
 
 const W = [LABEL_IDS.doc, LABEL_IDS.exec, LABEL_IDS.review];
 type Field = { selection?: string[]; integer?: string[]; dateString?: string[]; text?: string[]; user?: { emailAddress?: string }[] };
@@ -49,6 +52,9 @@ function codes(s: Snap) {
 function restoreMods(before: Snap, after: Snap): unknown[] {
   const mods: unknown[] = [];
   for (const lid of W) {
+    const hadBefore = before.labels.some((l) => l.id === lid);
+    const hasNow = after.labels.some((l) => l.id === lid);
+    if (!hadBefore) { if (hasNow) mods.push({ labelId: lid, removeLabel: true }); continue; } // label wasn't there: remove it
     const b = before.labels.find((l) => l.id === lid)?.fields ?? {};
     const a = after.labels.find((l) => l.id === lid)?.fields ?? {};
     const fm: unknown[] = [];
@@ -102,21 +108,27 @@ import { writeFileSync } from "node:fs";
   const fy0 = decodeLabels(before.labelInfo as never).fiscal_year;
   const fy1 = fy0 && fy0 > 1990 ? fy0 - 1 : 2020;
 
-  const s = await editOne({ file_id: fileId, set: { fiscal_year: fy1 } }, { session, db: D });
-  line("SINGLE", { http: s.status, ...s.body });
-  const a1 = await snap(t.at);
-  line("AFTER1", { modifiedTime: a1.modifiedTime, ...codes(a1) });
+  const restore = async () => {
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/modifyLabels`, {
+      method: "POST", headers: { authorization: `Bearer ${t.at}`, "content-type": "application/json" },
+      body: JSON.stringify({ kind: "drive#modifyLabelsRequest", labelModifications: restoreMods(before, await snap(t.at)) }),
+    });
+    line("RESTORE", { http: r.status });
+  };
+  let s: { status: number; body: Record<string, unknown> }, b: typeof s, a1: Snap, a2: Snap;
+  try {
+    s = await editOne({ file_id: fileId, set: { fiscal_year: fy1 } }, { session, db: D });
+    line("SINGLE", { http: s.status, ...s.body });
+    a1 = await snap(t.at);
+    line("AFTER1", { modifiedTime: a1.modifiedTime, ...codes(a1) });
 
-  const b = await editBulk({ file_ids: [fileId], set: { fiscal_year: fy1 - 1 }, confirm: true }, { session, db: D });
-  line("BULK", { http: b.status, report: (b.body as { report?: unknown }).report });
-  const a2 = await snap(t.at);
-  line("AFTER2", { modifiedTime: a2.modifiedTime, ...codes(a2) });
-
-  const mods = restoreMods(before, a2);
-  const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/modifyLabels`, {
-    method: "POST", headers: { authorization: `Bearer ${t.at}`, "content-type": "application/json" }, body: JSON.stringify({ kind: "drive#modifyLabelsRequest", labelModifications: mods }),
-  });
-  line("RESTORE", { http: r.status });
+    b = await editBulk({ file_ids: [fileId], set: { fiscal_year: fy1 - 1 }, confirm: true }, { session, db: D });
+    line("BULK", { http: b.status, report: (b.body as { report?: unknown }).report });
+    a2 = await snap(t.at);
+    line("AFTER2", { modifiedTime: a2.modifiedTime, ...codes(a2) });
+  } finally {
+    await restore(); // always put the pilot file back, even if a step above failed (CISO review)
+  }
   const fin = await snap(t.at);
   line("FINAL", { modifiedTime: fin.modifiedTime, ...codes(fin) });
   const handlingSame = JSON.stringify(before.labels.find((l) => l.id === LABEL_IDS.handling)) === JSON.stringify(fin.labels.find((l) => l.id === LABEL_IDS.handling));
