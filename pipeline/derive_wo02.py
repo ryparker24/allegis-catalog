@@ -154,3 +154,15 @@ def nokind_rule(name, segs, only=None):
         if nrx and not nrx.search(n): continue
         return rid, kind
     return None, None
+
+
+# ------------------------------------------------------------------ item 9 · PROPOSED re-kind rules (Ryan, live Review queue)
+# Proposals only (scripts/measure_wo02_item9b.py measures them); nothing applies these until Ryan rules.
+RECLASS_PROPOSALS = [
+    ("RK1", "fix KND-049 '(?i)pledge (agreement|fin)' -> '(?i)pledge agreement'; then name 'fin report'/'financial report'/"
+            "'qtr' on no-kind or loc_agreement files -> quarterly_report (Qtr / quarter / Qn) else financial_statements"),
+    ("RK2", "name 'operating agreement' -> operating_agreement (NEW kind, Datum FORM-04); amendments / restated: ruling needed"),
+    ("RK3", "name 'subscription booklet/book/package/docs', or counsel 'blank'/'form'/'template' -> kind template "
+            "(not when fully executed). R-022 Status has no 'template' choice, so this is a KIND, not a Status"),
+    ("RK4", "name 'certificate of amendment'/'name change'/'DE amendment' -> formation_filing (not tax returns / forms)"),
+]

@@ -282,6 +282,28 @@ Both reviews ran read-only on `f408e52..cat-wo-02-p2`. Each finding and its fix 
 
 After the ruling: `py pipeline\apply_derive_wo02.py --db-url-file <db> --apply --nokind-ruled NK01,…`, then `--resync`, then report the no-kind count before and after.
 
+**Item 9 · re-kind proposals from Ryan's look at the live Review queue** (`scripts/measure_wo02_item9b.py`; labelled files; counts only; nothing applied). These overlap with none of each other.
+
+| # | Rule (proposed) | Would change | Kind before → after |
+|---|---|---:|---|
+| RK1 | Retire the `fin` branch of KND-049 (below). Then a name with "Fin Report" / "Financial Report" / "Fin Rpt" / "Qtr" / "Qtrly" on a no-kind or `loc_agreement` file → `quarterly_report` if it also says Qtr / quarter / Q1–Q4, else `financial_statements` | 747 | (none) → quarterly_report 409 · (none) → financial_statements 311 · loc_agreement → quarterly_report 26 · loc_agreement → financial_statements 1. Left alone: quarterly_report 189, correspondence 2, fund_analysis 1 |
+| RK2 | Name "Operating Agreement" → **`operating_agreement`**, a new kind (Datum FORM-04) | 136 | lpa → 97 · lpa_amendment → 28 · correspondence → 11 |
+| RK3 | Name "Subscription Booklet / Book / Package / Docs", or (issuer = counsel and "blank" / "form" / "template") → kind **`template`**, unless fully executed | 35 | subscription_agreement → template 26 · correspondence → template 9. Left alone: 6 fully executed booklets. The counsel-blank branch matched 0 files (issuer = counsel is rare on these) |
+| RK4 | Name "Certificate of Amendment" / "Name Change" / "DE Amendment" / "Delaware Amendment" / "Amendment to (the) Certificate" → `formation_filing`, except tax returns and forms | 18 | (none) → formation_filing 10 · legal_agreement → formation_filing 8. Already correct: formation_filing 9. Left alone: tax_return 2 |
+
+**Why `loc_agreement` was set (RK1).**
+- Rule **KND-049 v1** (name, priority 30, note "MTV pledge vehicles") has the pattern `(?i)pledge (agreement|fin)`. The `fin` branch also matches the MTV pledge vehicles' "Pledge Fin(ancial) Report" names, and priority 30 wins over the report rules.
+- KND-049 fires on **27 labelled files, and all 27 are these reports.** So it currently sets no correct `loc_agreement` at all.
+- The other loc rule, KND-023 (`line of credit|credit agreement|loan agreement|\yLOC\y`, priority 25), fires on 7 files and isn't involved.
+- **Proposed fix:** narrow KND-049 to `(?i)pledge agreement`. That would be a new rule version, then `derive`.
+
+**Decisions inside these, for Ryan:**
+- **RK1 vs NK07.** 707 of RK1's 720 no-kind files also match NK07 (the "report in a Reports folder" → quarterly_report proposal). If both are approved, RK1 should run first, because it separates quarterly reports from financial statements.
+- **RK2 amendments.** 82 of the 136 are amendments or restatements (54 now `lpa`, 28 `lpa_amendment`); 54 are base agreements. Should amendments become `operating_agreement` too, or a new `operating_agreement_amendment`?
+- **RK2 correspondence.** The 11 `correspondence` files may be cover emails about an operating agreement. Should they be excluded?
+- **RK2 needs a new Kind choice.** That means a choice on the Allegis Document label (49 → 50 of 200 allowed), a `ref.vocab` row, and a label publish.
+- **RK3 is a kind, not a Status.** R-022's Status choices are Draft / In review / Final / Issued / Superseded, with no "template". Since `template` already exists as a **kind**, I proposed the kind. If Ryan wants it as a Status, R-022 needs a sixth choice.
+
 **P-K1 · management company K-1s** (the "Mgmt Co / … Investments in …" folders, 407+ K-1s). The files carry no single manco entity, so K1-R1 sets nothing. If Ryan names the management company those folders belong to, a rule can set receiving = that manco and issuing = the fund on the file.
 
 ### Deviations / notes (Part 2)
