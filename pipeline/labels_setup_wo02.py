@@ -22,7 +22,7 @@ EXTRA_ISSUING = {"EXTERNAL": "External (third party)"}
 EXTRA_RECEIVING = {"LP": "LP (outside limited partner)", "EXTERNAL": "External (third party)"}
 NEW_EXEC_TITLE = "Status & Execution"
 # item 9 RK2 (Ryan): two new choices on the Allegis Document label's Kind field, published WITH Part 2, not before
-NEW_KIND_CHOICES = {"operating_agreement": "Operating agreement", "operating_agreement_amendment": "Operating agreement amendment"}
+NEW_KIND_CHOICES = {"operating_agreement": "Operating Agreement", "operating_agreement_amendment": "Operating Agreement Amendment"}
 # CYBER-II is not a real entity (AllegisCyber II = CIP-II): its Entity choice is DISABLED at the Part 2 publish, never
 # deleted (a deleted choice would orphan any value already on a file; 0 files carry it today)
 DISABLE_ENTITY_CHOICES = ["CYBER-II"]
@@ -123,24 +123,72 @@ def _field(lab, display):
     return next((f for f in lab.get("fields", []) if f["properties"]["displayName"] == display), None)
 
 
+# Ryan: permission and visibility "Ryan only", same as the existing four labels. Every label this step touches must
+# have exactly the same permission set as Allegis Document, and that set may name nobody but Ryan.
+OWNER = "ryan@allegiscapital.com"
+WO02_LABELS = ("Allegis Document", "Parties", NEW_EXEC_TITLE)
+
+
+def _perms(svc, lab):
+    """All permissions of a label (paged) as {(principal kind, principal, role)}; one principal per permission."""
+    out, tok = set(), None
+    while True:
+        r = svc.labels().permissions().list(parent=_base(lab), useAdminAccess=True, pageToken=tok).execute()
+        for pm in r.get("labelPermissions", []):
+            if pm.get("email"): out.add(("email", pm["email"].lower(), pm["role"]))
+            elif pm.get("audience"): out.add(("audience", pm["audience"], pm["role"]))
+            else: out.add(("other", pm.get("group") or pm.get("person") or pm.get("name", "?"), pm["role"]))
+        tok = r.get("nextPageToken")
+        if not tok: return out
+
+
+def _perm_problems(svc, labs):
+    """[] when every WO-02 label has the same permissions as Allegis Document and they name only Ryan."""
+    want = _perms(svc, labs["Allegis Document"])
+    probs = [f"Allegis Document: a permission for someone other than Ryan ({k})" for k, who, _ in want if not (k == "email" and who == OWNER)]
+    if not want: probs.append("Allegis Document: no permissions found")
+    for t in WO02_LABELS[1:]:
+        if t in labs and _perms(svc, labs[t]) != want:
+            probs.append(f"{t}: permissions differ from Allegis Document")
+    return probs
+
+
+def _reconcile_perms(svc, src, dst):
+    """Make dst's permissions equal src's (create missing; delete extra). Users / groups by EMAIL only, audiences by
+    audience only - one principal per request (the API's oneof; reviews)."""
+    want, have = _perms(svc, src), _perms(svc, dst)
+    for k, who, role in sorted(want - have):
+        body = {"role": role, ("email" if k == "email" else "audience"): who}
+        if k == "other": raise SystemExit(f"source label has a permission type this script won't copy ({who}) - set it in Label manager")
+        svc.labels().permissions().create(parent=_base(dst), body=body, useAdminAccess=True).execute()
+    extra = have - want
+    if extra:
+        r = svc.labels().permissions().list(parent=_base(dst), useAdminAccess=True).execute()
+        for pm in r.get("labelPermissions", []):
+            key = ("email", pm["email"].lower(), pm["role"]) if pm.get("email") else ("audience", pm.get("audience"), pm["role"]) if pm.get("audience") else None
+            if key in extra:
+                svc.labels().permissions().delete(name=pm["name"], useAdminAccess=True).execute()
+    return len(want - have), len(extra)
+
+
 def create_drafts(svc, by_title, parties, exec_new):
     """Drafts / unpublished deltas only - nothing is visible to users until --publish. Idempotent: re-running skips
     what is already there."""
     doc = by_title["Allegis Document"]
-    # 1. L11 Parties: a new label as a DRAFT, with the same permissions as Allegis Document (appliers can use it)
+    src_probs = [p for p in _perm_problems(svc, {"Allegis Document": doc}) if p.startswith("Allegis Document")]
+    if src_probs: raise SystemExit("STOP: " + "; ".join(src_probs))
+    # 1. L11 Parties: a new label as a DRAFT, with the same permissions as Allegis Document (Ryan only)
     if "Parties" not in by_title:
         body = {"labelType": "ADMIN", "properties": {"title": "Parties", "description":
                 "Who issued the document and who received it (codes only: entity / portco codes, LP, EXTERNAL). CAT-WO-02 R-021."},
                 "fields": [spec for spec, _ in parties.values()]}
         lab = svc.labels().create(body=body, useAdminAccess=True).execute()
-        perms = svc.labels().permissions().list(parent=_base(doc), useAdminAccess=True).execute().get("labelPermissions", [])
-        for pm in perms:
-            body = {k: pm[k] for k in ("email", "group", "audience", "person") if pm.get(k)}
-            body["role"] = pm["role"]
-            svc.labels().permissions().create(parent=_base(lab), body=body, useAdminAccess=True).execute()
-        print(f"+ Parties: created as DRAFT, {len(perms)} permission(s) copied from Allegis Document")
+        print("+ Parties: created as DRAFT")
     else:
-        print("= Parties: exists - not changed")
+        lab = by_title["Parties"]
+        print("= Parties: exists")
+    added, removed = _reconcile_perms(svc, doc, lab)            # also repairs a half-done earlier run
+    print(f"  Parties permissions = Allegis Document's (Ryan only): +{added} / -{removed}")
     # 2. Execution -> "Status & Execution": + Status, + Issued date (unpublished delta)
     ex = by_title.get("Execution") or by_title[NEW_EXEC_TITLE]
     reqs = []
@@ -173,6 +221,19 @@ def publish(svc, parties):
     """Publish Parties, Status & Execution and Allegis Document, then write their ids into src/lib/labels_schema.json
     (the app reads it at build time: Parties / Status / Issued date become editable and the re-sync writes them)."""
     labs = _labels(svc)
+    probs = _perm_problems(svc, labs)
+    if probs: raise SystemExit("STOP, nothing published: " + "; ".join(probs))
+    # what is pending, so changes someone made by hand in Label manager are not published unseen (CISO review)
+    exec_have = {f["properties"]["displayName"] for f in labs[NEW_EXEC_TITLE].get("fields", [])}
+    kind_have = {c["properties"]["displayName"] for c in _field(labs["Allegis Document"], "Kind").get("selectionOptions", {}).get("choices", [])}
+    for title in ("Parties", NEW_EXEC_TITLE, "Allegis Document"):
+        lc = labs[title].get("lifecycle", {})
+        print(f"  {title}: state {lc.get('state')}, unpublished changes {bool(lc.get('hasUnpublishedChanges'))}, "
+              f"revision {labs[title].get('revisionId')} (published {labs[title].get('publishedRevisionId')})")
+    missing = [x for x in ("Status", "Issued date") if x not in exec_have] + [d for d in NEW_KIND_CHOICES.values() if d not in kind_have]
+    if missing: raise SystemExit(f"STOP, nothing published: not in the drafts yet: {missing} - run --create-drafts --release")
+    if "--yes" not in sys.argv:
+        raise SystemExit("Check the lines above against Label manager, then re-run with --publish --release --yes.")
     for title in ("Parties", NEW_EXEC_TITLE, "Allegis Document"):
         lab = labs[title]
         if lab.get("lifecycle", {}).get("state") == "PUBLISHED" and not lab.get("lifecycle", {}).get("hasUnpublishedChanges"):
@@ -198,10 +259,14 @@ def publish(svc, parties):
     E = labs[NEW_EXEC_TITLE]
     schema["exec"]["title"] = NEW_EXEC_TITLE
     st = _field(E, "Status")
-    schema["exec"]["fields"]["status"] = {"field_id": st["id"], "type": "selectionOptions", "choices": choices(st, STATUS)}
+    sch = choices(st, STATUS)
+    if set(sch) != set(STATUS): raise SystemExit(f"Status: {len(set(STATUS) - set(sch))} choice(s) missing on the published label - stop")
+    schema["exec"]["fields"]["status"] = {"field_id": st["id"], "type": "selectionOptions", "choices": sch}
     schema["exec"]["fields"]["issued_date"] = {"field_id": _field(E, "Issued date")["id"], "type": "dateOptions"}
     D = labs["Allegis Document"]
-    schema["doc"]["fields"]["kind"]["choices"].update(choices(_field(D, "Kind"), NEW_KIND_CHOICES))
+    kch = choices(_field(D, "Kind"), NEW_KIND_CHOICES)
+    if set(kch) != set(NEW_KIND_CHOICES): raise SystemExit("Kind: a new choice is missing on the published label - stop")
+    schema["doc"]["fields"]["kind"]["choices"].update(kch)
     for code in DISABLE_ENTITY_CHOICES:
         schema["doc"]["fields"]["entity"]["choices"].pop(code, None)   # disabled: the app never offers or writes it
     json.dump(schema, open(path, "w", encoding="utf-8"), indent=1)

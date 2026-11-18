@@ -16,9 +16,13 @@ export async function reviewWrite(body: unknown, ctx: { session: Session; db: Db
   const v = validateReview(o);
   if (!v.ok) return { status: 400, body: { error: "bad_input", reason: v.reason } };
 
-  const q = await ctx.db.rows<{ document_id: string | null; queue_reason: string }>(
-    "SELECT document_id, queue_reason FROM app.v_review_queue WHERE file_id = $1", [fileId]);
+  const q = await ctx.db.rows<{ document_id: string | null; queue_reason: string; requires_execution: boolean | null }>(
+    "SELECT document_id, queue_reason, requires_execution FROM app.v_review_queue WHERE file_id = $1", [fileId]);
   if (!q.length) return { status: 404, body: { error: "not_in_queue" } };
+  // R-022 on the server too (CISO review): Status is for non-executable documents only - the Status-unknown lane, or
+  // a file the catalog does not mark as requiring execution. An executable document gets a Stage.
+  if (v.value.docStatus && q[0].queue_reason !== "status_unknown" && q[0].requires_execution === true)
+    return { status: 400, body: { error: "bad_input", reason: "status_not_for_executable" } };
 
   const { labelModifications, labels } = buildReviewMods({ ...v.value, reviewerEmail: ctx.session.email });
   const d = await modifyLabels(ctx.session.at, fileId, labelModifications, ctx.fetch);

@@ -20,6 +20,9 @@ ALTER TABLE cat.document
     ADD COLUMN IF NOT EXISTS portcos_confirmed            text[];
 
 -- NOT VALID + VALIDATE: the scan of ~200k rows runs without holding the table's exclusive lock (coder review)
+-- DROP first so a re-run replaces an older body (review: duplicate_object kept a stale one)
+ALTER TABLE cat.document DROP CONSTRAINT IF EXISTS document_status_codes;
+ALTER TABLE cat.document DROP CONSTRAINT IF EXISTS document_parties_codes;
 DO $$ BEGIN
     ALTER TABLE cat.document ADD CONSTRAINT document_status_codes CHECK (
         coalesce(status_auto, 'draft') IN ('draft','in_review','final','issued','superseded') AND
@@ -185,6 +188,13 @@ SELECT 'KND-049', 2, field, applies_to, '(?i)pledge agreement', value, priority,
 FROM ops.decomposition_rule WHERE rule_id = 'KND-049' AND version = 1
 ON CONFLICT (rule_id, version) DO NOTHING;
 
+-- (RK2, review) the two new kinds replace lpa / lpa_amendment, which are executable kinds: so are they (signed
+--     agreements keep their Stage). ops.build_documents and apply_derive_wo02.py read this list.
+INSERT INTO ref.vocab (list_name, code, label, parent_code, synonyms, sort, active)
+SELECT 'executable_kind', v.code, v.code, NULL, '{}', (SELECT coalesce(max(sort), 0) FROM ref.vocab WHERE list_name = 'executable_kind') + v.n, true
+FROM (VALUES ('operating_agreement', 1), ('operating_agreement_amendment', 2)) v(code, n)
+WHERE NOT EXISTS (SELECT 1 FROM ref.vocab x WHERE x.list_name = 'executable_kind' AND x.code = v.code);
+
 -- (CYBER-II, Ryan) CYBER-II is not a real entity; "AllegisCyber II" is CIP-II (Cyber Innovation Partners II).
 --     ENT-018 / ENT-018P v2 point to CIP-II; the CYBER-II alias row goes and the entity is made inactive (kept, not
 --     deleted, for history). The Drive Entity choice is DISABLED (not deleted) at the Part 2 label publish.
@@ -330,7 +340,7 @@ CREATE OR REPLACE VIEW app.v_review_queue WITH (security_barrier = true) AS
           WHERE (NOT v.reviewed)) q
   WHERE (queue_reason IS NOT NULL);
 
-CREATE OR REPLACE VIEW app.v_review_counts AS
+CREATE OR REPLACE VIEW app.v_review_counts WITH (security_barrier = true) AS   -- as in 001 (review: was dropped)
  SELECT ( SELECT count(*)::integer FROM app.v_review_queue WHERE queue_reason = 'stage_unknown'::text) AS stage_unknown,
     ( SELECT count(*)::integer FROM app.v_review_queue WHERE queue_reason = 'low_confidence_executed'::text) AS low_confidence_executed,
     ( SELECT count(*)::integer FROM app.v_review_queue WHERE queue_reason = 'no_kind'::text) AS no_kind,

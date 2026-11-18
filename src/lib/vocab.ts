@@ -29,6 +29,8 @@ export const VOCAB = {
     "merger_agreement": "Merger Agreement",
     "minutes": "Minutes",
     "nda": "NDA",
+    "operating_agreement": "Operating Agreement",
+    "operating_agreement_amendment": "Operating Agreement Amendment",
     "pbc_request": "PBC Request",
     "policy": "Policy",
     "ppm": "PPM",

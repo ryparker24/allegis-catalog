@@ -46,7 +46,7 @@ def ro(url):
     return c
 
 
-APP_VIEWS = ["v_find", "v_review_queue", "v_review_counts", "v_portco", "v_entity"]
+APP_VIEWS = ["v_find", "v_find_x", "v_review_queue", "v_review_counts", "v_portco", "v_entity"]   # + v_find_x (CAT-WO-02 004)
 owner, app = ro(read_url(a.owner_url_file)), ro(read_url(a.app_url_file))
 
 print("== G1 (read-only, real data)")

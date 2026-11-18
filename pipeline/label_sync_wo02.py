@@ -118,7 +118,7 @@ def finish_run(cur, rid, rep):
 def report_line(mode, rep, apply):
     return (f"{mode.upper()} {'APPLIED' if apply else 'DRY RUN (nothing written)'}: read {rep['read']:,} · "
             f"confirmed by a person {rep['confirmed_by_person']:,} · re-synced {rep['resynced']:,} · "
-            f"skipped as person-owned {rep['skipped_person']:,} · errors {rep['errors']:,}")
+            f"skipped as person-owned {rep['skipped_person']:,} · errors {rep['errors']:,}" + (f" · Entity held for Review {rep['held_for_review']:,}" if rep.get('held_for_review') else ""))
 
 
 # ------------------------------------------------------------------ 7.1 read-back
@@ -192,7 +192,10 @@ def readback(connect, svc, schema, apply=False, ids=None, log=print):
 
 
 # ------------------------------------------------------------------ 7.2 re-sync
-def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.sleep):
+def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.sleep, hold_entities=()):
+    """hold_entities: file ids whose Entity is NOT written (an entity conflict sent to Review, e.g. NL-I + NL-II)."""
+    hold_entities = set(hold_entities or ())
+    held = set()
     fields = schema.active_fields()
     rep = {"read": 0, "confirmed_by_person": 0, "resynced": 0, "skipped_person": 0, "errors": 0, "by_field": {}, "no_state": 0}
     conn = connect()
@@ -226,6 +229,8 @@ def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.s
             return "no_state"             # never seen by a read-back: nothing known about who set what -> not touched
         e = cl.expected(rows.get(fid, {}), schema)
         write, skip = plan_resync(e, d, st["machine"], st.get("person_fields") or [], fields)
+        if fid in hold_entities and "entities" in write:
+            write = [f for f in write if f != "entities"]; held.add(fid)   # a set: the per-batch re-plan calls this again
         return write, skip, e
 
     def one(fid, L):
@@ -246,6 +251,7 @@ def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.s
     cl.read_labels(svc, ids, schema.include_labels(), on_item=lambda fid, L: (seen.add(fid), one(fid, L)))
     rep["errors"] += len(set(ids) - seen)
     rep["by_field"] = {"write": dict(write_by_field), "skipped_person": dict(skipped_by_field)}
+    rep["held_for_review"] = len(held)
     if not apply:
         rep["resynced"] = 0
         rep["notes"] = f"would re-sync {len(plans):,} files"
@@ -324,6 +330,7 @@ def main():
     ap.add_argument("--token", required=True)
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--only", nargs="*")
+    ap.add_argument("--hold-entities", nargs="*", default=[], help="file ids whose Entity is not re-synced (sent to Review)")
     a = ap.parse_args()
     schema = cl.Schema(cl.load_schema())
     scopes = ["https://www.googleapis.com/auth/drive.metadata"] if a.mode == "resync" else ["https://www.googleapis.com/auth/drive.readonly"]
@@ -335,7 +342,7 @@ def main():
     if a.mode == "readback":
         readback(connect, svc, schema, apply=a.apply, ids=a.only or None)
     else:
-        resync(connect, svc, schema, apply=a.apply, only=a.only)
+        resync(connect, svc, schema, apply=a.apply, only=a.only, hold_entities=a.hold_entities)
 
 
 if __name__ == "__main__":
