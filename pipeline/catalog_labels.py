@@ -140,8 +140,10 @@ def diff(a, b, fields):
 
 
 # ------------------------------------------------------------------ Drive reads (batched, read-only)
-def read_labels(svc, ids, include_labels, batch=100, on_progress=None):
-    """{file_id: {'http': 200|404|..., 'labelInfo': {...}|None}}. Retries 429/5xx/rate-limit with backoff."""
+def read_labels(svc, ids, include_labels, batch=100, on_progress=None, on_item=None):
+    """{file_id: {'http': 200|404|..., 'labelInfo': {...}|None}}. Retries 429/5xx/rate-limit with backoff.
+    With on_item(file_id, result) each result is handed over as its batch completes and NOT kept (memory stays
+    flat on a full ~60k-file read-back); the return value is then empty."""
     out, todo, done = {}, list(ids), 0
     while todo:
         chunk, todo = todo[:batch], todo[batch:]
@@ -169,6 +171,9 @@ def read_labels(svc, ids, include_labels, batch=100, on_progress=None):
         else:
             for fid in chunk:
                 out.setdefault(fid, {"http": 0, "labelInfo": None})
+        if on_item:
+            for fid in chunk:
+                if fid in out: on_item(fid, out.pop(fid))
         if retry:
             todo = retry + todo
             time.sleep(3 + random.random() * 3)

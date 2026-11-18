@@ -132,19 +132,18 @@ def readback(conn, svc, schema, apply=False, ids=None, log=print):
         for i in range(0, len(ids), 5000):
             rows.update(cl.catalog_rows(cur, ids[i:i + 5000]))
     conn.commit()
-    live = cl.read_labels(svc, ids, schema.include_labels())
     by_field = collections.Counter()
     labelled, unlabelled, upd_state, confirms = [], [], [], []
-    for fid in ids:
-        L = live.get(fid) or {"http": 0}
+
+    def one(fid, L):
         if L["http"] == 404:
-            continue                       # gone / no access: the crawl handles removals
+            return                         # gone / no access: the crawl handles removals
         if L["http"] != 200:
-            rep["errors"] += 1; continue
+            rep["errors"] += 1; return
         rep["read"] += 1
         d = schema.decode(L["labelInfo"])
         if not d["has_doc_label"]:
-            unlabelled.append(fid); continue
+            unlabelled.append(fid); return
         labelled.append(fid)
         st = state.get(fid) or {}
         # first read-back: the machine snapshot is the catalog's values (unchanged since the bulk write - item 0.4)
@@ -160,6 +159,10 @@ def readback(conn, svc, schema, apply=False, ids=None, log=print):
         live_codes = {k: d[k] for k in fields} | {"review_status": d["review_status"], "reviewed_by_set": d["reviewed_by_set"]}
         upd_state.append((fid, json.dumps(machine, default=str), json.dumps(live_codes, default=str), d["review_status"], d["reviewed_by_set"],
                           sorted(set(st.get("person_fields") or []) | set(owned))))
+
+    seen = set()
+    cl.read_labels(svc, ids, schema.include_labels(), on_item=lambda fid, L: (seen.add(fid), one(fid, L)))
+    rep["errors"] += len(set(ids) - seen)      # never answered after all retries
     rep["by_field"] = dict(by_field)
     rep["notes"] = f"labelled {len(labelled):,}; read but without the Allegis Document label {len(unlabelled):,}"
     if apply:
@@ -200,16 +203,15 @@ def resync(conn, svc, schema, apply=False, only=None, log=print, sleep=time.slee
             rows.update(cl.catalog_rows(cur, ids[i:i + 5000]))
     conn.commit()
     # read live labels right before writing, so a person's edit since the last read-back is still respected
-    live = cl.read_labels(svc, ids, schema.include_labels())
     plans, skipped_by_field, write_by_field = [], collections.Counter(), collections.Counter()
-    for fid in ids:
-        L = live.get(fid) or {"http": 0}
+
+    def one(fid, L):
         if L["http"] != 200:
-            rep["errors"] += L["http"] != 404; continue
+            rep["errors"] += L["http"] != 404; return
         rep["read"] += 1
         d = schema.decode(L["labelInfo"])
         if not d["has_doc_label"]:
-            continue                      # not labelled: the bulk labeller's job, not the re-sync's
+            return                        # not labelled: the bulk labeller's job, not the re-sync's
         st = state.get(fid) or {}
         e = cl.expected(rows.get(fid, {}), schema)
         machine = st.get("machine") or e
@@ -218,6 +220,10 @@ def resync(conn, svc, schema, apply=False, only=None, log=print, sleep=time.slee
             rep["skipped_person"] += 1; skipped_by_field.update(skip)
         if write:
             plans.append((fid, write, e)); write_by_field.update(write)
+
+    seen = set()
+    cl.read_labels(svc, ids, schema.include_labels(), on_item=lambda fid, L: (seen.add(fid), one(fid, L)))
+    rep["errors"] += len(set(ids) - seen)
     rep["by_field"] = {"write": dict(write_by_field), "skipped_person": dict(skipped_by_field)}
     if not apply:
         rep["resynced"] = 0
