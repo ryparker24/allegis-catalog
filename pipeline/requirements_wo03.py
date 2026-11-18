@@ -325,18 +325,25 @@ def main():
     a = ap.parse_args()
     url = dbg.checked_url(a.db_url_file, a.release)
     today = datetime.date.fromisoformat(a.today) if a.today else datetime.date.today()
+    with psycopg.connect(url) as conn:
+        run_build(conn, today, apply=a.apply)
+
+
+def run_build(conn, today=None, apply=False, log=print):
+    """Rebuild ops.requirement on an open connection (nightly hook in drive_crawl.py, or main). Commits only when apply."""
+    today = today or datetime.date.today()
     t0 = time.time()
-    with psycopg.connect(url) as conn, conn.cursor() as cur:
-        run, rows, mix = build(cur, today)
-        if a.apply:
+    with conn.cursor() as cur:
+        run, rows, mix = build(cur, today, log=log)
+        if apply:
             write(cur, run, rows)
             conn.commit()
         else:
             conn.rollback()
-    print(f"REQUIREMENTS {'APPLIED' if a.apply else 'DRY RUN (nothing written)'}: {len(rows):,} rows · run {run} · {time.time() - t0:.0f}s")
+    log(f"REQUIREMENTS {'APPLIED' if apply else 'DRY RUN (nothing written)'}: {len(rows):,} rows · run {run} · {time.time() - t0:.0f}s")
     for rid in sorted(mix):
         v = mix[rid]
-        print(f"  {rid:10} n={sum(v.values()):5,}  " + "  ".join(f"{k}={n:,}" for k, n in sorted(v.items(), key=lambda kv: URGENCY.get(kv[0].split(':')[-1], 9))))
+        log(f"  {rid:10} n={sum(v.values()):5,}  " + "  ".join(f"{k}={n:,}" for k, n in sorted(v.items(), key=lambda kv: URGENCY.get(kv[0].split(':')[-1], 9))))
 
 
 if __name__ == "__main__":
