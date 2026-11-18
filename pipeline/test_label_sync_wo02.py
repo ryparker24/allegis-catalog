@@ -100,6 +100,15 @@ check("G-D4 K-1: ambiguous GP fund stays blank (never guessed)", dw.k1_parties([
 check("G-D5 K-1: K-1 folder with many K-1s and one fund -> issued to LP", dw.k1_parties(["taxes", "2024", "k-1s"], ["MTV-III"], types, 12, codes) == ("MTV-III", ["LP"], "K1-R3-issued-to-lps"))
 check("G-D6 K-1: unknown stays blank", dw.k1_parties(["misc"], [], types, 1, codes) == (None, [], None))
 check("G-D7 no-kind rules apply only when ruled (empty ruling -> nothing)", dw.nokind_rule("Invoice_123", [], only=set()) == (None, None) and dw.nokind_rule("Invoice_123", [], only={"NK02"})[1] == "invoice")
+R = dw.NOKIND_RULED
+check("G-D8 K1N: 'K-1' / 'Schedule K1' in the name -> k1; 'K-1065' is not a K-1",
+      dw.nokind_rule("2023 Schedule K1 - x", [], only=R)[0] == "K1N" and dw.nokind_rule("NJ K-1065 2023", [], only=R) == (None, None))
+check("G-D9 K1F: a pdf in a K-1 folder -> k1; a spreadsheet / archive there is skipped",
+      dw.nokind_rule("scan_0012", ["taxes", "2023 k-1s"], only=R, family="pdf") == ("K1F", "k1")
+      and dw.nokind_rule("allocation", ["taxes", "2023 k-1s"], only=R, family="sheet") == (None, None)
+      and dw.nokind_rule("bundle", ["taxes", "k-1s"], only=R, family="archive") == (None, None))
+check("G-D10 NK01 is gone (replaced by K1N / K1F); NK12 matches a Workpapers folder",
+      "NK01" not in {r[0] for r in dw.NOKIND_RULES} and dw.nokind_rule("tb", ["2023 workpapers"], only={"NK12"})[1] == "workpaper")
 
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

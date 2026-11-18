@@ -142,4 +142,28 @@ INSERT INTO ops.decomposition_rule (rule_id, version, field, applies_to, pattern
   $re$(?i)\y(?:Tax|Taxes|Audit|K-?1'?s?)[ _-]+((?:19|20)[0-9]{2})(?:[^0-9]|$)$re$, $v$\1$v$, 10, true,
   'CAT-WO-02 (from CAT-WO-03 prep, was PER-010): year after Tax/Taxes/Audit/K-1 in a folder name', false, false)
 ON CONFLICT (rule_id, version) DO NOTHING;
+
+-- (T1 ruling, Ryan) a state partnership return (CA 568, NY IT-204, NJ-1065 ...) is a tax_return: KND-024 wins over
+--     KND-041 (both were priority 25 and tied) by moving to priority 24 (v2; v1 is kept for history).
+--     Exceptions checked before KND-024:
+--       state K-1s ('Sch K-1', 'Schedule K-1', 'K-1') -> k1: already KND-001 at priority 20, no new rule needed;
+--       payment vouchers / extensions -> tax_form: KND-057 at priority 23. Form numbers 3537 / 3538 / 7004 / 8868
+--       always; 'voucher' / 'extension' only next to a tax word or a return number (a fund-term or lease
+--       'extension' is not a tax form). Name rules run in Python (drive_crawl.derive), so the lookahead is fine.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM ops.decomposition_rule WHERE rule_id = 'KND-057' AND value <> 'tax_form') THEN
+        RAISE EXCEPTION 'KND-057 already used by a different rule: pick a free rule id';
+    END IF;
+END $$;
+INSERT INTO ops.decomposition_rule (rule_id, version, field, applies_to, pattern, value, priority, active, notes, multi, provisional)
+SELECT 'KND-024', 2, field, applies_to, pattern, value, 24, true,
+       'CAT-WO-02 T1 ruling: state partnership returns are tax_return; beats KND-041 (25)', multi, provisional
+FROM ops.decomposition_rule WHERE rule_id = 'KND-024' AND version = 1
+ON CONFLICT (rule_id, version) DO NOTHING;
+INSERT INTO ops.decomposition_rule (rule_id, version, field, applies_to, pattern, value, priority, active, notes, multi, provisional) VALUES
+ ('KND-057', 1, 'kind', 'name',
+  $re$(?i)\y(3537|3538|7004|8868)\y|^(?=.*(\ytax|\y(1065|1120S?|990|568|565|1040|IT-?204|FTB)\y)).*\y(vouchers?|extensions?)\y$re$,
+  'tax_form', 23, true, 'CAT-WO-02 T1 ruling: payment vouchers / extensions are tax_form, checked before KND-024', false, false)
+ON CONFLICT (rule_id, version) DO NOTHING;
 COMMIT;

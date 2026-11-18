@@ -116,8 +116,11 @@ def status_for(kind, executable, name, segs, stage=None):
 # Each rule: (id, kind it would set, folder-segment pattern or None, name pattern or None, plain-words description).
 # A file matches when every given pattern matches (folder: any segment). First match wins, in this order.
 NOKIND_RULES = [
-    ("NK01", "k1", r"(‹k-?1'?s?›|‹1s›)", None,
-     "a folder named for K-1s (e.g. '…/<FY> K-1s from PwC/…', '…/Final K-1s/…')"),
+    # K1N / K1F: Ryan approved (CAT-WO-02 item 9 ruling); they replace NK01 ("a folder named for K-1s", any file type)
+    ("K1N", "k1", None, r"(‹k-?1(?![0-9])|‹k1s›|‹k-1s›|‹schedule k-?1(?![0-9]))",
+     "the name says K-1 ('K-1', 'K1', 'K-1s', 'Schedule K-1'; not 'K-1065'-style numbers)"),
+    ("K1F", "k1", r"(‹k-?1'?s?›(?![0-9])|‹k1s›)", None,
+     "a folder named for K-1s ('<FY> K-1s', 'K-1s from <auditor>', 'Final K-1s') and the file is a pdf / doc / image"),
     ("NK02", "invoice", None, r"(‹inv(oice)?s?›|‹inv ?#?\d)",
      "'invoice' / 'inv #' in the name"),
     ("NK03", "bank_stmt", r"‹statements?›", r"(‹statements?›|‹stmts?›)",
@@ -138,18 +141,23 @@ NOKIND_RULES = [
      "'capital call' in the name"),
     ("NK11", "distribution_notice", None, r"‹dist(ribution)? notice›",
      "'distribution notice' in the name"),
-    ("NK12", "workpaper", r"(<workpapers?>|<pbc>)", None,
+    ("NK12", "workpaper", r"(‹workpapers?›|‹pbc›)", None,
      "inside a '…Workpapers…' or '…PBC…' folder"),
 ]
-NOKIND_RULED = {}   # rule id -› True once Ryan approves (CAT-WO-02 item 9); derivation applies only these
+# the rules Ryan has approved; apply_derive_wo02.py applies these (and only these) by default
+NOKIND_RULED = frozenset({"K1N", "K1F"})
+# a rule limited to some file types (cat.file.file_type_family): a spreadsheet / archive in a K-1 folder is usually a
+# workpaper or an allocation, not a K-1 (Ryan: keep K1F's skip of spreadsheets and archives)
+NK_FAMILIES = {"K1F": frozenset({"pdf", "image", "doc"})}
 _NK = [(rid, kind, W(frx) if frx else None, W(nrx) if nrx else None, d) for rid, kind, frx, nrx, d in NOKIND_RULES]
 
 
-def nokind_rule(name, segs, only=None):
+def nokind_rule(name, segs, only=None, family=None):
     """(rule id, kind) of the first matching rule, optionally only among `only` (the ruled ids)."""
     n = name or ""
     for rid, kind, frx, nrx, _ in _NK:
         if only is not None and rid not in only: continue
+        if rid in NK_FAMILIES and (family or "") not in NK_FAMILIES[rid]: continue
         if frx and not any(frx.search(s) for s in segs): continue
         if nrx and not nrx.search(n): continue
         return rid, kind
@@ -169,7 +177,7 @@ RECLASS_PROPOSALS = [
 
 
 # ------------------------------------------------------------------ item 9 · PROPOSED K-1 kind rules (FY2023 gap, CAT-WO-03 prep)
-# Proposals only (scripts/measure_wo02_item9c.py measures them, whole catalog); nothing applies these until Ryan rules.
+# APPROVED by Ryan (they are K1N / K1F in NOKIND_RULES above, replacing NOKIND NK01); kept as the plain-words record.
 K1_KIND_PROPOSALS = [
     ("K1N", "name says K-1 ('K-1', 'K1', 'K-1s', 'Schedule K-1'; not 'K-1065'-style numbers) on a no-kind file -> k1"),
     ("K1F", "a folder named for K-1s ('2023 K-1s', 'K-1s from PwC', 'Final K-1s') AND the file is document-like "
