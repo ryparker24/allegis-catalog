@@ -68,16 +68,18 @@ def run(conn, ruled=None, apply=True, log=print):
         not_exec = [(d,) for d, (rid, k) in new_kind.items() if old_kind[d] in executable and k not in executable]
         c["execution:cleared_by_rekind"] = len(not_exec)
         cur.execute("""SELECT v.file_id, v.document_id, f.name, f.path_segments, f.parent_ids[1], v.kind, v.entities,
-                              coalesce(v.requires_execution, false), v.stage, v.is_primary, f.file_type_family
+                              coalesce(v.requires_execution, false), v.stage, v.is_primary, f.file_type_family, v.fiscal_year
                        FROM app.v_find v JOIN cat.file f USING (file_id) WHERE v.document_id IS NOT NULL""")
         rows = cur.fetchall()
         k1_folder = collections.Counter(r[4] for r in rows if r[5] == "k1")
         # one result per document: prefer the primary copy's path/name
         rows.sort(key=lambda r: (r[1], not r[9]))
         seen, parties, status = set(), [], []
-        for fid, doc, name, segs, parent, kind, ents, req, stage, primary, fam in rows:
+        fy_of = {}
+        for fid, doc, name, segs, parent, kind, ents, req, stage, primary, fam, fy in rows:
             if doc in seen: continue
             seen.add(doc)
+            fy_of[doc] = fy
             if doc in new_kind:                                   # new_kind holds machine kinds only
                 kind = new_kind[doc][1]
                 req = kind in executable and bool(req)            # an executable re-kind keeps the file's flag
@@ -91,6 +93,20 @@ def run(conn, ruled=None, apply=True, log=print):
             parties.append((iss, recv or None, rule, doc))
             st, srule = dw.status_for(kind, bool(req) or kind in executable, name, (segs or [])[1:], stage)
             status.append((st, srule, doc)); c[f"status:{st or '-'}"] += 1
+        # CAT-WO-03 default (Ryan's K1-R2 question): a GP RECEIVES one or a few K-1s a year from its fund. More than
+        # K1R2_MAX "received" K-1s for one GP and fiscal year are K-1s the GP issued to its members (or a mixed folder),
+        # so that group's parties go back to unknown (the subject step sends them to Match subject) - never a guess.
+        grp = collections.Counter((r[0], fy_of.get(d)) for i, r, ru, d in parties if ru == "K1-R2-gp-received" and r)
+        crowded = {g for g, n in grp.items() if n > dw.K1R2_MAX}
+        if crowded:
+            out = []
+            for i, r, ru, d in parties:
+                if ru == "K1-R2-gp-received" and r and (r[0], fy_of.get(d)) in crowded:
+                    c["parties:K1-R2-gp-received"] -= 1; c["parties:K1-R2-crowded->unknown"] += 1
+                    out.append((None, None, None, d))
+                else:
+                    out.append((i, r, ru, d))
+            parties = out
         log(f"labelled documents considered (parties / status): {len(seen):,}; catalog documents whose machine kind changes: {len(kinds):,}")
         for k, n in sorted(c.items()): log(f"  {k:<40} {n:>7,}")
         if not apply:

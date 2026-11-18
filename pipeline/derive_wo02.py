@@ -34,6 +34,9 @@ def gp_fund(gp_code, entity_codes):
     return base if base != gp_code and base in entity_codes else None
 
 
+K1R2_MAX = 3   # CAT-WO-03: more "received" K-1s than this for one GP and fiscal year = crowded -> unknown (apply_derive_wo02)
+
+
 def k1_parties(segs, ents, ent_type, k1_in_folder, entity_codes):
     """
     segs: lower-cased folder path segments (drive name dropped); ents: entity codes on the file;

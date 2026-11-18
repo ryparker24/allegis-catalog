@@ -71,4 +71,13 @@ INSERT INTO ops.requirement_rule (rule_id, version, checklist, subtype_code, no_
  '{"status": ["final", "issued"]}', true,
  'Ruled 2026-11-17. Per partner per quarter, FY2025 forward. Catalog-only (no Datum subtype) until Datum adds one.')
 ON CONFLICT (rule_id, version) DO NOTHING;
+-- K1-SET v2 (2026-11-18, default taken for Ryan's review): Met by Final OR Issued. No K-1 in the catalog carries
+-- Issued; Part 2's markers give Final (1,949) / Draft / In review. Draft and In review stay "on file".
+INSERT INTO ops.requirement_rule (rule_id, version, checklist, subtype_code, no_datum_subtype, satisfying_kinds, subject_type,
+                                  entity_filter, partner_filter, period_from, satisfied_when, active, notes)
+SELECT rule_id, 2, checklist, subtype_code, no_datum_subtype, satisfying_kinds, subject_type, entity_filter, partner_filter,
+       period_from, '{"status": ["final", "issued"]}'::jsonb, true,
+       'v2 2026-11-18 (default for Ryan''s review): Final or Issued. v1 (Issued only) kept for history. FY2025 forward; roster match required.'
+FROM ops.requirement_rule WHERE rule_id = 'K1-SET' AND version = 1
+ON CONFLICT (rule_id, version) DO NOTHING;
 COMMIT;
