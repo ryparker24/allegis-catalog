@@ -39,6 +39,11 @@ export const COLUMN_DEFS: ColDef[] = [
   { key: "modified_time", label: "Modified", type: "date", source: "db", sql: "modified_time", width: 110 },
   { key: "file_type_family", label: "File type", type: "pick", source: "db", sql: "file_type_family", facet: "file_type_family", width: 110 },
   { key: "review_status", label: "Review status", type: "pick", source: "live", vocab: "review", width: 130 },
+  // CAT-WO-02 Part 2 (R-021 / R-022): served by app.v_find_x
+  { key: "issuing_entity", label: "Issuing entity", type: "pick", source: "db", sql: "issuing_entity", facet: "issuing_entity", width: 140 },
+  { key: "receiving_entities", label: "Receiving entity", type: "pick", source: "db", sql: "receiving_entities", array: true, facet: "receiving_entity", width: 150 },
+  { key: "status", label: "Status", type: "pick", source: "db", sql: "status", vocab: "status", facet: "status", width: 110 },
+  { key: "issued_date", label: "Issued date", type: "date", source: "db", sql: "issued_date", width: 110 },
   { key: "file_id", label: "File ID", type: "text", source: "db", sql: "file_id", width: 180 },
   { key: "document_id", label: "Catalog ID", type: "text", source: "db", sql: "document_id::text", width: 110 },
 ];
@@ -60,4 +65,5 @@ export function isFilterable(key: string): boolean {
 export const PICK_FILTER_KEY: Record<string, string> = {
   kind: "kind", entities: "entity", portcos: "portco", period: "period", stage: "stage", workstream: "workstream",
   issuer: "issuer", tier: "tier", file_type_family: "file_type_family",
+  issuing_entity: "issuing_entity", receiving_entities: "receiving_entity", status: "status",
 };

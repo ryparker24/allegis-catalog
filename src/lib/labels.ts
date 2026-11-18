@@ -2,13 +2,21 @@ import schema from "./labels_schema.json";
 
 type FieldDef = { field_id: string; type: string; choices?: Record<string, string> };
 type LabelDef = { label_id: string; title: string; fields: Record<string, FieldDef> };
-const S = schema as unknown as Record<"doc" | "exec" | "handling" | "review", LabelDef>;
+// "parties" (L11, R-021) and exec.status / exec.issued_date (R-022) exist only once published: optional here.
+const S = schema as unknown as Record<"doc" | "exec" | "handling" | "review", LabelDef> & { parties?: LabelDef };
+export const SCHEMA = S;
+/** true when a label field exists on the published labels (labels_schema.json). */
+export function hasField(label: string, field: string): boolean {
+  const L = (S as Record<string, LabelDef | undefined>)[label];
+  return !!L && !!L.fields[field];
+}
 
-export const LABEL_IDS = {
+export const LABEL_IDS: Record<string, string> = {
   doc: S.doc.label_id,
   exec: S.exec.label_id,
   handling: S.handling.label_id,
   review: S.review.label_id,
+  ...(S.parties ? { parties: S.parties.label_id } : {}),
 };
 /** includeLabels for files.get: all four catalog labels. */
 export const INCLUDE_LABELS = Object.values(LABEL_IDS).join(",");
@@ -35,13 +43,17 @@ export interface LiveValues {
   contains: string[];
   review_status: string | null;
   review_note: string | null;
+  status: string | null;
+  issued_date: string | null;
+  issuing_entity: string | null;
+  receiving_entities: string[];
 }
 
 type LabelField = { selection?: string[]; integer?: string[]; text?: string[]; dateString?: string[]; user?: { emailAddress?: string }[] };
 type LabelInfo = { labels?: { id: string; fields?: Record<string, LabelField> }[] } | null | undefined;
 
 export function decodeLabels(info: LabelInfo): LiveValues {
-  const v: LiveValues = { has_doc_label: false, kind: null, entities: [], portcos: [], fiscal_year: null, period: null, workstream: null, issuer: null, stage: null, executed_date: null, tier: null, contains: [], review_status: null, review_note: null };
+  const v: LiveValues = { has_doc_label: false, kind: null, entities: [], portcos: [], fiscal_year: null, period: null, workstream: null, issuer: null, stage: null, executed_date: null, tier: null, contains: [], review_status: null, review_note: null, status: null, issued_date: null, issuing_entity: null, receiving_entities: [] };
   for (const L of info?.labels ?? []) {
     const lk = labelKeyById.get(L.id);
     if (!lk) continue;
@@ -66,6 +78,10 @@ export function decodeLabels(info: LabelInfo): LiveValues {
         case "handling.contains": v.contains = sel.sort(); break;
         case "review.status": v.review_status = sel[0] ?? null; break;
         case "review.note": v.review_note = fv.text?.[0] ?? null; break;
+        case "exec.status": v.status = sel[0] ?? null; break;
+        case "exec.issued_date": v.issued_date = fv.dateString?.[0] ?? null; break;
+        case "parties.issuing_entity": v.issuing_entity = sel[0] ?? null; break;
+        case "parties.receiving_entities": v.receiving_entities = sel.sort(); break;
       }
     }
   }

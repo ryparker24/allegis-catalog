@@ -32,7 +32,7 @@ export function checkSameOrigin(req: Request, env: AppEnv): string | null {
  * Every API route starts here: (1) Cloudflare Access, (2) a live session, (3) domain + allowlist
  * re-checked on every request (so removing someone from ALLOWLIST takes effect at once), (4) write scope if asked.
  */
-export async function requireUser(req: Request, env: AppEnv, opts: { write?: boolean; route?: string } = {}): Promise<Guarded> {
+export async function requireUser(req: Request, env: AppEnv, opts: { write?: boolean; route?: string; next?: "/" | "/review" } = {}): Promise<Guarded> {
   const acc = await checkAccess(req, env);
   if (!acc.ok) {
     logEvent("denied", { route: opts.route, reason: acc.reason, http_status: 403 });
@@ -55,7 +55,7 @@ export async function requireUser(req: Request, env: AppEnv, opts: { write?: boo
     return { ok: false, response: json({ error: "forbidden", reason: "access_google_mismatch" }, 403) };
   }
   if (opts.write && !canWrite(s)) {
-    return { ok: false, response: json({ error: "consent_required", login: "/api/auth/login?scope=write&next=/review" }, 409) };
+    return { ok: false, response: json({ error: "consent_required", login: `/api/auth/login?scope=write&next=${opts.next ?? "/review"}` }, 409) };
   }
   return { ok: true, session: s };
 }

@@ -116,6 +116,17 @@ export const VOCAB = {
     "valuation": "Valuation",
     "vendors_ap": "Vendors AP"
   },
+  "status": {
+    "draft": "Draft",
+    "in_review": "In review",
+    "final": "Final",
+    "issued": "Issued",
+    "superseded": "Superseded"
+  },
+  "party_extra": {
+    "LP": "An outside limited partner (no LP names; LP codes only from a list Ryan approves)",
+    "EXTERNAL": "Any other third party"
+  },
   "issuer": {
     "administrator": "Administrator",
     "allegis": "Allegis",

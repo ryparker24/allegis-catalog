@@ -32,6 +32,10 @@ export interface Row {
   issuer: string | null;
   tier: string | null;
   review_status: string | null;
+  status: string | null;
+  issued_date: string | null;
+  issuing_entity: string | null;
+  receiving_entities: string[];
   signed_date: string | null;
   effective_date: string | null;
   is_primary: boolean | null;
@@ -46,7 +50,7 @@ export interface Row {
 }
 export interface NotShown { noAccess: number; checkFailed: number; total: number }
 
-const LIST_OF: Record<string, VocabList | undefined> = { kind: "kind", period: "period", stage: "stage", tier: "tier", workstream: "workstream", issuer: "issuer", review: "review", review_status: "review" };
+const LIST_OF: Record<string, VocabList | undefined> = { kind: "kind", period: "period", stage: "stage", tier: "tier", workstream: "workstream", issuer: "issuer", review: "review", review_status: "review", status: "status" };
 export function show(col: string, v: unknown): string {
   if (v == null || v === "") return "";
   if (Array.isArray(v)) return v.join(", ");
