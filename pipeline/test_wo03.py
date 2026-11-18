@@ -1,5 +1,5 @@
 """CAT-WO-03 pipeline guard tests (offline; synthetic names only).   py pipeline\\test_wo03.py"""
-import datetime, os, sys, json
+import copy, datetime, os, sys, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import subject_wo03 as sw
 import requirements_wo03 as rq
@@ -151,9 +151,16 @@ check("G-T8 a person emptying Subject code(s) is stored as '{}' (none), never NU
 
 # ---------------------------------------------------------------- labels plan (offline)
 schema = json.load(open(ls3.SCHEMA_PATH, encoding="utf-8"))
-p = ls3.plan(schema, list(schema["doc"]["fields"]["entity"]["choices"]) + ["NEW-1"])
+pre = copy.deepcopy(schema)        # the schema as it was before Ryan published the CAT-WO-03 changes
+for f in ("subject_codes", "subject_person"):
+    pre["parties"]["fields"].pop(f, None)
+pre["handling"]["fields"]["contains"].get("choices", {}).pop("personnel", None)
+p = ls3.plan(pre, list(pre["doc"]["fields"]["entity"]["choices"]) + ["NEW-1"])
 check("G-L1 label plan: new entity choices, Subject fields, Personnel info, within limits",
-      p["new_entities"] == ["NEW-1"] and p["add_personnel"] and set(p["add_subject_fields"]) <= {"subject_codes", "subject_person"} and not p["problems"])
+      p["new_entities"] == ["NEW-1"] and p["add_personnel"] and set(p["add_subject_fields"]) == {"subject_codes", "subject_person"} and not p["problems"])
+p = ls3.plan(schema, list(schema["doc"]["fields"]["entity"]["choices"]))
+check("G-L1b published schema: nothing left to add (Subject fields, Personnel info, entity choices)",
+      not p["new_entities"] and not p["add_personnel"] and not p["add_subject_fields"] and not p["problems"])
 p = ls3.plan(schema, [f"E{i}" for i in range(300)])
 check("G-L2 label plan refuses more than 200 choices", any("choices > 200" in x for x in p["problems"]))
 

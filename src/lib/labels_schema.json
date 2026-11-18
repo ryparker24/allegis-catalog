@@ -99,7 +99,18 @@
      "NL-II": "eb3b0dcade",
      "TM": "bae854a242",
      "X": "6f0367d881",
-     "XI": "fed0c7b972"
+     "XI": "fed0c7b972",
+     "ASOF (GP)": "a086c06af1",
+     "ATTOTUDE": "0bb13a7c46",
+     "CIP-II (GP)": "6aa29b41fe",
+     "FUNDAM": "0804c0c094",
+     "LS-I": "2063fb3ef1",
+     "LS-II": "fa5b588252",
+     "MTV-III (PF)": "207da77e38",
+     "MTV-III (PF) (GP)": "1ba830e0f1",
+     "NL-I (GP)": "a135ccdc83",
+     "NL-II (GP)": "9432f2d2e3",
+     "X (GP)": "f7b6363cd7"
     }
    },
    "portco": {
@@ -393,7 +404,8 @@
      "lp_pii": "94852c0230",
      "bank_details": "4412905e4d",
      "tax_id": "c8b3822901",
-     "credentials": "c922d673e9"
+     "credentials": "c922d673e9",
+     "personnel": "1be06df363"
     }
    }
   }
@@ -611,7 +623,18 @@
      "ncomma": "f942bb7b82",
      "tcell.": "b78d7a0854",
      "varmou": "a4a980f75a",
-     "EXTERNAL": "68a9ac067b"
+     "EXTERNAL": "68a9ac067b",
+     "ASOF (GP)": "178a51a487",
+     "ATTOTUDE": "ef6ed63a5e",
+     "CIP-II (GP)": "21391c0b65",
+     "FUNDAM": "0f8d429ae7",
+     "LS-I": "b1607e5d11",
+     "LS-II": "76b8b508b3",
+     "MTV-III (PF)": "f18fa15b6f",
+     "MTV-III (PF) (GP)": "90bd31dbc6",
+     "NL-I (GP)": "db5350652a",
+     "NL-II (GP)": "fa1784c14f",
+     "X (GP)": "2f82a7c6d4"
     }
    },
    "receiving_entities": {
@@ -655,8 +678,27 @@
      "X": "bca171eea8",
      "XI": "9542eed15b",
      "LP": "a49f32beb9",
-     "EXTERNAL": "593b62efaa"
+     "EXTERNAL": "593b62efaa",
+     "ASOF (GP)": "1298d77c11",
+     "ATTOTUDE": "d44eb43008",
+     "CIP-II (GP)": "ab70d1ca74",
+     "FUNDAM": "8822976259",
+     "LS-I": "c5479e22fd",
+     "LS-II": "a4cefb76b6",
+     "MTV-III (PF)": "17dd068573",
+     "MTV-III (PF) (GP)": "75362f47a5",
+     "NL-I (GP)": "343e04a0ac",
+     "NL-II (GP)": "abc920b77f",
+     "X (GP)": "0ad7495e58"
     }
+   },
+   "subject_codes": {
+    "field_id": "178a51a487",
+    "type": "textOptions"
+   },
+   "subject_person": {
+    "field_id": "ef6ed63a5e",
+    "type": "userOptions"
    }
   }
  }
