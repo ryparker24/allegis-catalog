@@ -104,3 +104,42 @@ COMMIT;
 BEGIN;
 GRANT SELECT ON app.v_find_x TO catalog_app;
 COMMIT;
+
+-- ---------------------------------------------------------------- fiscal-year derivation fixes (from CAT-WO-03 prep, Ryan-approved)
+-- Released with Part 2's derive + resync. Both take effect at the next `drive_crawl.py derive` (ops.apply_rules).
+BEGIN;
+-- (2) deterministic winner: two signals tied on priority / distance / source used to pick a different winner per
+--     execution (the same diff gave 774 / 775 / 776). A final key (rule_id, value) makes the winner stable.
+CREATE OR REPLACE VIEW cat.v_file_best AS
+ SELECT DISTINCT ON (s.file_id, s.field) s.file_id,
+    s.field,
+    s.value,
+    s.rule_id,
+    s.rule_version,
+    s.source,
+    s.matched
+   FROM cat.file_signal s
+     JOIN ops.decomposition_rule r ON r.rule_id = s.rule_id AND r.version = s.rule_version
+  WHERE NOT r.multi
+  ORDER BY s.file_id, s.field, s.priority, s.distance, (s.source = 'name'::text) DESC, s.rule_id, s.value;
+
+-- (1) a folder's year when it sits before / after Tax, Taxes, Tax Return(s), Audit or K-1 inside the name
+--     ("<fund> 2012 K-1s", "<x> 2006 Taxes", "Tax 2014"); PER-001/003/008 read it only at the start of the name.
+--     Priority 10 like PER-001/003, so the NEAREST folder still wins on distance. Capture = the year only.
+--     NOTE: the prep file named the second rule PER-010, but PER-010 v1 already exists on main (a fiscal_quarter
+--     rule), so its ON CONFLICT DO NOTHING would have skipped it silently. It is PER-014 here (free on main).
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM ops.decomposition_rule WHERE rule_id IN ('PER-009', 'PER-014') AND field <> 'fiscal_year') THEN
+        RAISE EXCEPTION 'PER-009 / PER-014 already used by a different rule: pick free rule ids';
+    END IF;
+END $$;
+INSERT INTO ops.decomposition_rule (rule_id, version, field, applies_to, pattern, value, priority, active, notes, multi, provisional) VALUES
+ ('PER-009', 1, 'fiscal_year', 'path_segment',
+  $re$(?i)(?:^|[^0-9])((?:19|20)[0-9]{2})[ _-]*(?:K-?1'?s?|Tax|Taxes|Tax Returns?|Audit)\y$re$, $v$\1$v$, 10, true,
+  'CAT-WO-02 (from CAT-WO-03 prep): year inside a folder name, before Tax/Taxes/Audit/K-1', false, false),
+ ('PER-014', 1, 'fiscal_year', 'path_segment',
+  $re$(?i)\y(?:Tax|Taxes|Audit|K-?1'?s?)[ _-]+((?:19|20)[0-9]{2})(?:[^0-9]|$)$re$, $v$\1$v$, 10, true,
+  'CAT-WO-02 (from CAT-WO-03 prep, was PER-010): year after Tax/Taxes/Audit/K-1 in a folder name', false, false)
+ON CONFLICT (rule_id, version) DO NOTHING;
+COMMIT;

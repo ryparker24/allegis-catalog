@@ -166,3 +166,12 @@ RECLASS_PROPOSALS = [
             "(not when fully executed). R-022 Status has no 'template' choice, so this is a KIND, not a Status"),
     ("RK4", "name 'certificate of amendment'/'name change'/'DE amendment' -> formation_filing (not tax returns / forms)"),
 ]
+
+
+# ------------------------------------------------------------------ item 9 · PROPOSED K-1 kind rules (FY2023 gap, CAT-WO-03 prep)
+# Proposals only (scripts/measure_wo02_item9c.py measures them, whole catalog); nothing applies these until Ryan rules.
+K1_KIND_PROPOSALS = [
+    ("K1N", "name says K-1 ('K-1', 'K1', 'K-1s', 'Schedule K-1'; not 'K-1065'-style numbers) on a no-kind file -> k1"),
+    ("K1F", "a folder named for K-1s ('2023 K-1s', 'K-1s from PwC', 'Final K-1s') AND the file is document-like "
+            "(pdf / doc / image; not sheets, archives, email) on a no-kind file -> k1. Supersedes NK01 if both are ruled."),
+]
