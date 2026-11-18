@@ -1,6 +1,6 @@
 "use client";
 import { previewUrl, show, type Row } from "./client";
-import { shownName } from "./bus";
+import { maskNames, shownName } from "./bus";
 import { Icon } from "./icons";
 
 /** Drive's own preview in an iframe (Google enforces access inside it) + "Open in Drive". */
@@ -17,7 +17,10 @@ export function SidePanel({ row, onClose, children }: { row: Row; onClose: () =>
         <button className="btn sm outline" onClick={onClose} aria-label="Close preview"><Icon name="x" /></button>
       </div>
       <div className="panel-body">
-        <iframe className="preview" src={previewUrl(row.file_id)} title="Drive preview" allow="autoplay" referrerPolicy="no-referrer" />
+        {maskNames()
+          // screenshot mode (?mask=1): the document itself can show LP / personal details, so no preview is loaded
+          ? <div className="preview preview-masked" role="img" aria-label="Preview hidden in screenshot mode">Drive preview hidden in screenshot mode</div>
+          : <iframe className="preview" src={previewUrl(row.file_id)} title="Drive preview" allow="autoplay" referrerPolicy="no-referrer" />}
         <dl className="facts">
           {(["kind", "entities", "portcos", "fiscal_year", "period", "stage", "executed_date", "tier", "review_status"] as const).map((k) => (
             <div key={k}>

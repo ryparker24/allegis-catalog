@@ -346,3 +346,4 @@ button.ctr.kpi { font: inherit; text-align: left; color: var(--ink); cursor: poi
 .grid tbody tr:focus-visible td { outline: none; background: var(--sel); }
 .grid tbody tr:focus-visible td:first-child { box-shadow: inset 3px 0 0 var(--ink); }
 @media (max-width: 760px) { .counters { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ctr.kpi .k-exp { display: none; } }
+.preview-masked { display: grid; place-items: center; color: var(--muted); font: 500 11px/1 var(--f-mono); text-transform: uppercase; letter-spacing: .12em; background: repeating-linear-gradient(45deg, var(--bg), var(--bg) 8px, var(--card) 8px, var(--card) 16px); }
