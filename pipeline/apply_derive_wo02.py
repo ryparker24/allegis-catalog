@@ -1,6 +1,6 @@
 r"""
 CAT-WO-02 · write the R-021 (Parties on K-1s) and R-022 (Status) rule results to cat.document.*_auto,
-and - only for rules Ryan has ruled on - the item 9 no-kind rules to kind_auto.
+and the item 9 kind rules Ryan ruled on (RK2-RK4 re-kinds, then the no-kind rules) to kind_auto, whole catalog.
 
   py pipeline/apply_derive_wo02.py --db-url-file <url file>            # dry run: counts only
   py pipeline/apply_derive_wo02.py --db-url-file <url file> --apply    # writes *_auto (never *_confirmed)
@@ -30,24 +30,34 @@ with psycopg.connect(open(a.db_url_file).read().strip()) as conn, conn.cursor() 
     cur.execute("SELECT code FROM ref.vocab WHERE list_name = 'executable_kind'")
     executable = {r[0] for r in cur.fetchall()}
     c = collections.Counter()
-    # item 9 · the ruled no-kind rules run FIRST and over the WHOLE catalog (labelled or not; Ryan approved them
-    # catalog-wide), so a file that just became a K-1 also gets its K-1 parties / status in the pass below.
+    # item 9 · kinds run FIRST and over the WHOLE catalog (labelled or not; Ryan approved the rules catalog-wide), so
+    # a file that just became a K-1 also gets its K-1 parties / status in the pass below. Machine kinds only: a
+    # document with a person's kind_confirmed is never touched.
+    #   1. RK2-RK4 re-kind (dw.rekind_rule) - they change a machine kind, e.g. lpa -> operating_agreement
+    #   2. the ruled no-kind rules (dw.nokind_rule: K1N, K1F, NK02-NK08, RK1Q / RK1F, NK12) on what is still blank
+    cur.execute("""SELECT DISTINCT ON (rule_id) pattern FROM ops.decomposition_rule
+                   WHERE rule_id = 'ISS-004P' AND active ORDER BY rule_id, version DESC""")
+    r = cur.fetchone(); dw.set_bank_pattern(r[0] if r else None)    # NK03: the banks the catalog knows
     new_kind = {}
-    if ruled:
-        cur.execute("""SELECT fd.document_id, f.name, f.path_segments, f.file_type_family
-                       FROM cat.file f JOIN cat.file_document fd ON fd.file_id = f.file_id
-                       JOIN cat.document d ON d.document_id = fd.document_id
-                       WHERE f.removed_run IS NULL AND f.trashed IS NOT TRUE AND f.is_shortcut IS NOT TRUE
-                         AND f.noise_flag IS NOT TRUE AND coalesce(f.handling, 'secret') <> 'secret'
-                         AND d.kind_confirmed IS NULL AND d.kind_auto IS NULL
-                       ORDER BY fd.document_id, (fd.file_role = 'primary') DESC""")
-        for doc, name, segs, fam in cur.fetchall():
-            if doc in new_kind: continue                     # one result per document: the primary copy decides
+    cur.execute("""SELECT fd.document_id, f.name, f.path_segments, f.file_type_family, d.kind_auto,
+                          coalesce(d.execution_stage_confirmed, d.execution_stage_auto),
+                          coalesce(d.issuer_confirmed, d.issuer_auto)
+                   FROM cat.file f JOIN cat.file_document fd ON fd.file_id = f.file_id
+                   JOIN cat.document d ON d.document_id = fd.document_id
+                   WHERE f.removed_run IS NULL AND f.trashed IS NOT TRUE AND f.is_shortcut IS NOT TRUE
+                     AND f.noise_flag IS NOT TRUE AND coalesce(f.handling, 'secret') <> 'secret'
+                     AND d.kind_confirmed IS NULL
+                   ORDER BY fd.document_id, (fd.file_role = 'primary') DESC""")
+    seen_doc = set()
+    for doc, name, segs, fam, kind, stage, issuer in cur.fetchall():
+        if doc in seen_doc: continue                         # one result per document: the primary copy decides
+        seen_doc.add(doc)
+        rid, k = dw.rekind_rule(name, kind, stage, issuer)
+        if not k and kind is None and ruled:
             rid, k = dw.nokind_rule(name, (segs or [])[1:], only=ruled, family=fam)
-            new_kind[doc] = (rid, k)
-        new_kind = {d: rk for d, rk in new_kind.items() if rk[1]}
-        for rid, _ in new_kind.values(): c[f"kind:{rid}"] += 1
-    kinds = [(k, d) for d, (rid, k) in new_kind.items()]
+        if k and k != kind:
+            new_kind[doc] = (rid, k); c[f"kind:{rid}:{kind or '(none)'}->{k}"] += 1
+    kinds = [(k, d, k) for d, (rid, k) in new_kind.items()]
     cur.execute("""SELECT v.file_id, v.document_id, f.name, f.path_segments, f.parent_ids[1], v.kind, v.entities,
                           coalesce(v.requires_execution, false), v.stage, v.is_primary, f.file_type_family
                    FROM app.v_find v JOIN cat.file f USING (file_id) WHERE v.document_id IS NOT NULL""")
@@ -59,7 +69,7 @@ with psycopg.connect(open(a.db_url_file).read().strip()) as conn, conn.cursor() 
     for fid, doc, name, segs, parent, kind, ents, req, stage, primary, fam in rows:
         if doc in seen: continue
         seen.add(doc)
-        kind = kind or new_kind.get(doc, (None, None))[1]
+        kind = new_kind[doc][1] if doc in new_kind else kind      # new_kind holds machine kinds only
         segs_l = [s.lower() for s in (segs or [])[1:]]
         if kind == "k1":
             iss, recv, rule = dw.k1_parties(segs_l, ents or [], ent_type, k1_folder[parent], set(ent_type))
@@ -69,7 +79,7 @@ with psycopg.connect(open(a.db_url_file).read().strip()) as conn, conn.cursor() 
         parties.append((iss, recv or None, rule, doc))
         st, srule = dw.status_for(kind, bool(req) or kind in executable, name, (segs or [])[1:], stage)
         status.append((st, srule, doc)); c[f"status:{st or '-'}"] += 1
-    print(f"labelled documents considered (parties / status): {len(seen):,}; catalog documents given a kind: {len(kinds):,}")
+    print(f"labelled documents considered (parties / status): {len(seen):,}; catalog documents whose machine kind changes: {len(kinds):,}")
     for k, n in sorted(c.items()): print(f"  {k:<36} {n:>7,}")
     if not a.apply:
         print("DRY RUN: nothing written"); sys.exit(0)
@@ -82,6 +92,7 @@ with psycopg.connect(open(a.db_url_file).read().strip()) as conn, conn.cursor() 
                     [(st, ru, d, st, ru) for st, ru, d in status])
     if kinds:   # kind_auto only, never over a person's kind; a later derive (build_documents) recomputes kind_auto,
                 # so this script runs after every `drive_crawl.py derive`
-        cur.executemany("UPDATE cat.document SET kind_auto=%s, updated_at=now() WHERE document_id=%s AND kind_auto IS NULL AND kind_confirmed IS NULL", kinds)
+        cur.executemany("""UPDATE cat.document SET kind_auto=%s, updated_at=now()
+                           WHERE document_id=%s AND kind_confirmed IS NULL AND kind_auto IS DISTINCT FROM %s""", kinds)
     conn.commit()
-    print(f"APPLIED: parties {len(parties):,} documents, status {len(status):,}, no-kind kinds {len(kinds):,}")
+    print(f"APPLIED: parties {len(parties):,} documents, status {len(status):,}, kinds {len(kinds):,}")

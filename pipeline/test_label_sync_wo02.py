@@ -99,7 +99,7 @@ check("G-D3 K-1: GP folder -> receiving GP, issuing its fund", dw.k1_parties(["t
 check("G-D4 K-1: ambiguous GP fund stays blank (never guessed)", dw.k1_parties(["taxes", "gp entities"], ["MTV-IV (GP)"], types, 1, codes)[0] is None)
 check("G-D5 K-1: K-1 folder with many K-1s and one fund -> issued to LP", dw.k1_parties(["taxes", "2024", "k-1s"], ["MTV-III"], types, 12, codes) == ("MTV-III", ["LP"], "K1-R3-issued-to-lps"))
 check("G-D6 K-1: unknown stays blank", dw.k1_parties(["misc"], [], types, 1, codes) == (None, [], None))
-check("G-D7 no-kind rules apply only when ruled (empty ruling -> nothing)", dw.nokind_rule("Invoice_123", [], only=set()) == (None, None) and dw.nokind_rule("Invoice_123", [], only={"NK02"})[1] == "invoice")
+check("G-D7 no-kind rules apply only when ruled (empty ruling -> nothing)", dw.nokind_rule("Invoice_123", [], only=set()) == (None, None) and dw.nokind_rule("Invoice_123", [], only={"NK02"}, family="pdf")[1] == "invoice")
 R = dw.NOKIND_RULED
 check("G-D8 K1N: 'K-1' / 'Schedule K1' in the name -> k1; 'K-1065' is not a K-1",
       dw.nokind_rule("2023 Schedule K1 - x", [], only=R)[0] == "K1N" and dw.nokind_rule("NJ K-1065 2023", [], only=R) == (None, None))
@@ -109,6 +109,32 @@ check("G-D9 K1F: a pdf in a K-1 folder -> k1; a spreadsheet / archive there is s
       and dw.nokind_rule("bundle", ["taxes", "k-1s"], only=R, family="archive") == (None, None))
 check("G-D10 NK01 is gone (replaced by K1N / K1F); NK12 matches a Workpapers folder",
       "NK01" not in {r[0] for r in dw.NOKIND_RULES} and dw.nokind_rule("tb", ["2023 workpapers"], only={"NK12"})[1] == "workpaper")
+dw.set_bank_pattern(r"(?i)\y(SVB|Silicon Valley Bank|Chase)\y")
+check("G-D11 NK03 only in bank-statement folders; never under Capital Account Statements / Financial Statements / K-1",
+      dw.nokind_rule("Statement_2023-03", ["mgmt co", "svb statements"], only=R, family="pdf") == ("NK03", "bank_stmt")
+      and dw.nokind_rule("Statement 2023", ["fund", "bank statements"], only=R, family="pdf")[0] == "NK03"
+      and dw.nokind_rule("Statement 2023", ["fund", "capital account statements"], only=R, family="pdf") == (None, None)
+      and dw.nokind_rule("Statement 2023", ["fund", "financial statements", "bank statements"], only=R, family="pdf") == (None, None)
+      and dw.nokind_rule("Statement 2023", ["lp statements"], only=R, family="pdf") == (None, None))
+check("G-D12 NK04 form numbers only (bare 'extension' dropped); NK02 / NK06 PDF and Word only; K1N / NK05 skip archives",
+      dw.nokind_rule("Fund Term Extension", [], only=R, family="pdf") == (None, None)
+      and dw.nokind_rule("2023 1099 x", [], only=R, family="pdf")[0] == "NK04"
+      and dw.nokind_rule("Invoice 12", [], only=R, family="sheet") == (None, None)
+      and dw.nokind_rule("Invoice 12", [], only=R, family="pdf")[0] == "NK02"
+      and dw.nokind_rule("K-1s 2023", [], only=R, family="archive") == (None, None)
+      and dw.nokind_rule("1065 return", ["tax returns"], only=R, family="archive") == (None, None))
+check("G-D13 RK1 before NK07: a quarter -> quarterly_report, else financial_statements; NK09-NK11 gone; PBC rejected",
+      dw.nokind_rule("Fin Report Q3", ["reports"], only=R, family="pdf") == ("RK1Q", "quarterly_report")
+      and dw.nokind_rule("Financial Report 2023", ["reports"], only=R, family="pdf") == ("RK1F", "financial_statements")
+      and dw.nokind_rule("Wire 12", [], only=R) == (None, None) and dw.nokind_rule("tb", ["pbc"], only=R) == (None, None))
+check("G-D14 RK2-RK4 re-kinds: operating agreement (amendment), template unless executed, formation filing; correspondence kept",
+      dw.rekind_rule("Operating Agreement", "lpa") == ("RK2", "operating_agreement")
+      and dw.rekind_rule("Amended and Restated Operating Agreement", "lpa") == ("RK2", "operating_agreement_amendment")
+      and dw.rekind_rule("Operating Agreement", "correspondence") == (None, None)
+      and dw.rekind_rule("Subscription Booklet", "subscription_agreement", "draft") == ("RK3", "template")
+      and dw.rekind_rule("Subscription Booklet", "subscription_agreement", "fully_executed") == (None, None)
+      and dw.rekind_rule("Certificate of Amendment", "legal_agreement") == ("RK4", "formation_filing")
+      and dw.rekind_rule("Certificate of Amendment", "tax_form") == (None, None))
 
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

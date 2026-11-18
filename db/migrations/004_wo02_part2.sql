@@ -166,4 +166,35 @@ INSERT INTO ops.decomposition_rule (rule_id, version, field, applies_to, pattern
   $re$(?i)\y(3537|3538|7004|8868)\y|^(?=.*(\ytax|\y(1065|1120S?|990|568|565|1040|IT-?204|FTB)\y)).*\y(vouchers?|extensions?)\y$re$,
   'tax_form', 23, true, 'CAT-WO-02 T1 ruling: payment vouchers / extensions are tax_form, checked before KND-024', false, false)
 ON CONFLICT (rule_id, version) DO NOTHING;
+
+-- (T1 ruling, round 3) financial_statements wins over workpaper. Both KNX-006 and KND-044 are priority 40 (not 25 as
+--     the recommendation assumed), so KNX-006 v2 goes to 39: it beats workpaper and nothing else. Priority 24 would
+--     also have put financial_statements above every kind rule at 25-39 (see the handoff for that count).
+INSERT INTO ops.decomposition_rule (rule_id, version, field, applies_to, pattern, value, priority, active, notes, multi, provisional)
+SELECT 'KNX-006', 2, field, applies_to, pattern, value, 39, true,
+       'CAT-WO-02 T1 ruling: financial_statements over workpaper (KND-044, 40)', multi, provisional
+FROM ops.decomposition_rule WHERE rule_id = 'KNX-006' AND version = 1
+ON CONFLICT (rule_id, version) DO NOTHING;
+
+-- (RK1, approved) KND-049 '(?i)pledge (agreement|fin)' also matched the MTV pledge vehicles' "Pledge Fin(ancial)
+--     Report" names and set loc_agreement on all 27 labelled hits. v2 keeps only 'pledge agreement'; the reports then
+--     reach RK1Q / RK1F in pipeline/derive_wo02.py (quarterly_report / financial_statements).
+INSERT INTO ops.decomposition_rule (rule_id, version, field, applies_to, pattern, value, priority, active, notes, multi, provisional)
+SELECT 'KND-049', 2, field, applies_to, '(?i)pledge agreement', value, priority, true,
+       'CAT-WO-02 RK1: pledge agreement only (the fin branch caught pledge-vehicle financial reports)', multi, provisional
+FROM ops.decomposition_rule WHERE rule_id = 'KND-049' AND version = 1
+ON CONFLICT (rule_id, version) DO NOTHING;
+
+-- (CYBER-II, Ryan) CYBER-II is not a real entity; "AllegisCyber II" is CIP-II (Cyber Innovation Partners II).
+--     ENT-018 / ENT-018P v2 point to CIP-II; the CYBER-II alias row goes and the entity is made inactive (kept, not
+--     deleted, for history). The Drive Entity choice is DISABLED (not deleted) at the Part 2 label publish.
+INSERT INTO ops.decomposition_rule (rule_id, version, field, applies_to, pattern, value, priority, active, notes, multi, provisional)
+SELECT rule_id, 2, field, applies_to, pattern, 'CIP-II', priority, true,
+       'CAT-WO-02: AllegisCyber II is CIP-II (CYBER-II retired)', multi, provisional
+FROM ops.decomposition_rule WHERE rule_id IN ('ENT-018', 'ENT-018P') AND version = 1
+ON CONFLICT (rule_id, version) DO NOTHING;
+DELETE FROM ref.entity_alias WHERE alias = 'CYBER-II' AND entity_code = 'CYBER-II';
+UPDATE ref.entity SET active = false,
+       notes = concat_ws(' · ', nullif(notes, ''), 'CAT-WO-02: retired, not a real entity; AllegisCyber II = CIP-II')
+WHERE entity_code = 'CYBER-II' AND active IS DISTINCT FROM false;
 COMMIT;

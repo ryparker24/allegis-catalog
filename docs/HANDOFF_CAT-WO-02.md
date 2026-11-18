@@ -146,7 +146,7 @@ So the read-back's first run has nothing person-set to pick up.
 - **Labels (item 5/6):** `pipeline/labels_setup_wo02.py` designs L11 Parties and Status & Execution through the labels_setup.py flow. Only `--check` was run (output below); nothing was created or published.
 - **Derivation:** `pipeline/apply_derive_wo02.py` writes `*_auto` only (a person's `*_confirmed` always wins). It ran with `--apply` on the branch. No-kind rules run only with `--nokind-ruled`, after Ryan's ruling.
 - **Find (items 5/6):** Issuing entity, Receiving entity, Status and Issued date columns, header filters, facets and export.
-- **Labels panel:** Parties and Status / Issued date appear as "Not published yet" with their full choice lists. Issuing has 184 choices: 37 entities, 146 portcos and EXTERNAL. Receiving has 39: 37 entities, LP and EXTERNAL.
+- **Labels panel:** Parties and Status / Issued date appear as "Not published yet" with their full choice lists. Issuing has 183 choices: 36 active entities (CYBER-II retired), 146 portcos and EXTERNAL. Receiving has 38: 36 entities, LP and EXTERNAL.
 - **Edit in the app (item 8).**
   - Single edits run from Find's side panel (`EditForm`).
   - Bulk edits run from **Actions → Set kind / entity / fiscal year / status…**, with a preview showing the count and the change, a confirm step, and a done / skipped / failed report.
@@ -304,38 +304,100 @@ Both reviews ran read-only on `f408e52..cat-wo-02-p2`. Each finding and its fix 
   - **Fixed in passing:** NK12's folder pattern was written `<workpapers?>` (a literal "<", left over from the sentinel swap), so it could never match. It is now `‹workpapers?›`.
   - Pipeline guard tests are now **25/25**: G-D8 K1N, G-D9 K1F skips sheets and archives, G-D10 NK01 is gone and NK12 matches.
 
-### For Ryan to rule on (nothing below is applied)
-**Item 9 · NK02–NK12 and T1: the ruling table** (`scripts/measure_wo02_item9d.py`; branch after the T1 ruling's derive; counts only).
-- **Kind before:** every NK row starts from (none). These are files with no kind.
-- **Counts:**
-  - Whole catalog = every live catalog file, labelled or not.
-  - The approved K1N / K1F run first, then NK02 → NK12. First match wins, so no file is counted twice.
-- **Example name patterns:**
-  - `*` = any other word, `_` = an underscore in the name, `<FY>` = a year, `<ENT:…>` = an entity code.
-  - LP and person names never appear.
-- **Starting point:** 84,168 live catalog files have no kind (18,416 labelled).
-  - K1N + K1F take 6,985 of them.
-  - With all NK rules as written, 68,120 (11,407 labelled) would stay no-kind and go to Review.
+### Ruled, round 3 (Ryan, 2026-11-18): NK02–NK12, T1, K1N archives, CYBER-II · applied on the throwaway branch
+Measured with `scripts/measure_wo02_item9d.py`, run after 004 + `derive` and before `apply_derive_wo02.py --apply`, then applied. Whole catalog = every live catalog file; a document's primary copy decides. Counts only.
 
-| Rule | What it matches, in plain words | Files changed: labelled / whole catalog | Kind before → after | 3 example name patterns | Recommendation |
-|---|---|---:|---|---|---|
-| NK02 | "invoice" or "inv #" in the name | 255 / 445 | (none) → invoice | `invoice _ <FY> _ * _ * _ from _ *` · `* _ *` · `*` | **Approve for PDF / Word only** (311 catalog). The 105 spreadsheets are invoice logs and trackers, not invoices. |
-| NK03 | "statement" in the name, inside a "…Statements" folder | 664 / 858 | (none) → bank_stmt | `* statement _ <FY> - * - * _ *` · `* - *` · `statement _ * _ *` | **Approve.** 811 of 858 are PDFs in statement folders. |
-| NK04 | a tax-form number (1042, 1099, 8804 / 8805, W-9 / W-8, 7004, 8868) or "extension" in the name | 466 / 1,306 | (none) → tax_form | `allegis capital * extension *` · `allegis capital - <FY> - * - * extension *` · `allegis - <FY> - * extension * - *` | **Approve the form-number half (805 catalog); drop the "extension" half (501).** Tax extensions next to a tax word are already `tax_form` through KND-057 (T1 ruling). The rest read like "Allegis Capital … Extension …", which can be a fund-term extension. |
-| NK05 | 1065 / 1120 / 990 / "return" in the name, inside a "…Tax Returns…" folder | 274 / 532 | (none) → tax_return | `allegis - <FY> - * and state return * - * report` · `final _ federal 1065 _ <ENT:MTV-I> iv - * _ <FY>` · `* 1065 _ <FY> <ENT:MTV-I (GP)> v llc` | **Approve, without the 18 archives** (514 catalog). |
-| NK06 | "valuation" or "409A" in the name | 620 / 1,410 | (none) → valuation_memo | `<ENT:MTV-I> iii funds * - * - * valuations` · `<ENT:MTV-II> funds * - * - * valuations` · `<ENT:MTV-I> * funds * - * - * valuations` | **Approve for PDF / Word only** (387 catalog). 1,013 are spreadsheets: valuation workbooks, not memos. Leave those to Review. |
-| NK07 | "report" in the name, inside a "…Reports…" folder | 816 / 1,494 | (none) → quarterly_report | `<ENT:MTV-I> iv - * report *` · `* report - * - *` · `* report *` | **Approve, after RK1** (already approved to run first). RK1 sends about 707 of these labelled files to quarterly_report or financial_statements first. |
-| NK08 | "receipt" in the name | 11 / 58 | (none) → receipt | `* - * report *` · `*` · `* _ * _ *` | **Approve.** Small; 50 of 58 are PDFs. |
-| NK09 | "wire" in the name | 39 / 595 | (none) → wire_confirmation | `* wires` · `* wire *` · `* <FY> wires` | **Reject.** 464 of 595 are spreadsheets and Word files (wire logs, wire instructions). "Wire" alone does not separate a confirmation from instructions. |
-| NK10 | "capital call" in the name | 0 / 0 | (none) → capital_call_notice | (no matches) | **Drop.** KND-003 already gives these names a kind. |
-| NK11 | "distribution notice" in the name | 0 / 0 | (none) → distribution_notice | (no matches) | **Drop.** KND-004 already gives these names a kind. |
-| NK12 | inside a "…Workpapers…" or "…PBC…" folder | 511 / 2,365 | (none) → workpaper | `*` · `* ( * )` · `* - *` | **Approve the Workpapers half (600 catalog); reject the PBC half (1,765).** PBC folders hold the source documents a client provides (statements, invoices, agreements); calling them workpapers would hide them from Review. |
-| T1 | files whose kind is still decided by rule-id order: two kind rules at the same priority give different kinds (after the KND-024 ruling) | 22 / 145 | e.g. safe_or_note → purchase_agreement 46 · board_consent → safe_or_note 27 · financial_statements → workpaper 15 · board_consent → purchase_agreement 14 · subscription_agreement → lpa 12 | `* - * agreement ( executed )` · `* <ENT:MTV-I> vi lpa & subscription agreement - from *` · `<ENT:MTV-I> v ( * ) * financial statements ( * cap * - * )` | **Accept the rule-id order** (stable now) for all pairs **except workpaper vs financial_statements** (15 / 12 labelled): give KNX-006 `financial_statements` priority 24, because those names say "financial statements". The rest are combined documents ("LPA & subscription agreement", "financials and cap table"), where either kind is defensible. |
+**Implementation**
+- **Code:** `pipeline/derive_wo02.py`, in `NOKIND_RULES` (all approved = `NOKIND_RULED`), `NK_FAMILIES` / `NK_NOT_FAMILIES`, `nk03_folder()` and `rekind_rule()` for RK2–RK4.
+- **`apply_derive_wo02.py` runs the kind passes in this order:**
+  1. RK2–RK4, which change a machine kind.
+  2. The no-kind rules, on whatever is still blank.
+  - Both passes cover the whole catalog, never touch a person's kind, and run before Parties / Status.
+- **Migration 004** adds:
+  - KNX-006 v2 (priority 39);
+  - KND-049 v2 (RK1);
+  - ENT-018 / ENT-018P v2 → CIP-II;
+  - CYBER-II alias row deleted, `ref.entity` CYBER-II set inactive.
+- **Removed:** NK01, NK09, NK10 and NK11, the "extension" half of NK04 and the PBC half of NK12.
+- **Guard tests:** pipeline 29/29. New: G-D11 NK03 bank folders, G-D12 file-type limits, G-D13 RK1 before NK07, G-D14 RK2–RK4.
 
-- **T1 on Drive:** besides the 413 tax-return changes, the re-sync would push **6** labelled kind changes from these ties (workpaper ↔ financial_statements 5, purchase_agreement → safe_or_note 1).
-- **NK counts above are for each rule as written.** The narrowed versions I recommend give the catalog counts in the last column. Labelled splits for the narrowed versions follow after the ruling.
-- **K1N also takes 15 archives** named "K-1s". K1F's spreadsheet/archive skip does not apply to a name match. Say if K1N should skip archives too.
-- **After the ruling:** `py pipeline\apply_derive_wo02.py --db-url-file <db> --apply`, with the approved ids added to `NOKIND_RULED`. Then `--resync`, and report the no-kind count before and after.
+| Rule | As ruled | Files changed: labelled / whole catalog | Kind before → after |
+|---|---|---:|---|
+| RK2 | "operating agreement" in the name; amendments / restatements → amendment kind; correspondence excluded | 123 / 224 | lpa → operating_agreement 147 · lpa_amendment → operating_agreement_amendment 77 |
+| RK3 | subscription booklet / book / package / docs (or counsel blank / form / template), not fully executed | 35 / 68 | subscription_agreement → template 47 · correspondence → template 18 · (none) → template 3 |
+| RK4 | certificate of amendment / name change / DE amendment; **correspondence excluded as in RK2** (11 cover emails would otherwise move) | 13 / 30 | (none) → formation_filing 22 · legal_agreement → formation_filing 8 |
+| K1N | "K-1" in the name; **archives skipped** | 222 / 436 | (none) → k1 |
+| K1F | K-1 folder, PDF / Word / image only | 3,186 / 6,648 | (none) → k1 |
+| NK02 | "invoice" / "inv #"; PDF and Word only | 221 / 298 | (none) → invoice |
+| NK03 | bank-statement folders only (see below) | **0 / 0** | — |
+| NK04 | form numbers only | 323 / 808 | (none) → tax_form |
+| NK05 | Tax Returns folder; archives skipped | 260 / 506 | (none) → tax_return |
+| NK06 | "valuation" / 409A; PDF and Word only | 123 / 387 | (none) → valuation_memo |
+| RK1 | KND-049 v2 frees the 27 pledge-vehicle reports; then a report name with a quarter → quarterly_report, without → financial_statements (before NK07) | 747 / 1,570 | (none) → quarterly_report 883 · (none) → financial_statements 687 (labelled 435 / 312) |
+| NK07 | "report" in a Reports folder, after RK1 | 109 / 442 | (none) → quarterly_report |
+| NK08 | "receipt" | 11 / 58 | (none) → receipt |
+| NK12 | Workpapers folders only | 237 / 502 | (none) → workpaper |
+| T1 | rule-ID order, except financial_statements over workpaper | 12 / 15 | workpaper → financial_statements |
+
+**Results on the branch**
+- **Documents:** apply changed the machine kind of **5,752** documents.
+- **No-kind files:** 84,216 → **72,561** (labelled 18,443 → **13,004**).
+- **RK1:** KND-049 now fires on 0 labelled files (it was 27).
+
+**NK03 · narrowed to bank-statement folders: 0 files qualify.** The old NK03 took 858; the ruling leaves them all out.
+
+| Excluded because | Labelled / catalog | What the folders are |
+|---|---:|---|
+| No "bank", no "account statement", no bank the catalog knows (ISS-004P) | 664 / 783 | **716 sit under Schwab statement folders** (Mgmt Co …/<x> Statements/<FY>/). 38 are credit-card statements. 16 are "Partner Statements" folders; the rest are a few other statement folders. 752 are PDFs. |
+| Financial Statements folder | 0 / 75 | `…/Financial Statements/` |
+
+- **No file was excluded for Capital Statements, Partner / Capital Account Statements or K-1 folders.** The old NK03's name check ("statement" in a "…Statements" folder) never reached them, apart from the 16 "Partner Statements" counted above.
+- **For Ryan:** Schwab is a brokerage and isn't in the catalog's bank list (ISS-004 issuer = bank: SVB, Chase, JPMorgan, Citizens, First Republic, Mercury, Capital One, Wells Fargo, US Bank).
+  - If Schwab statements are bank statements for this purpose, adding Schwab to ISS-004 / ISS-004P makes NK03 take about 716.
+  - Otherwise they stay no-kind and go to Review.
+
+**T1 · financial_statements over workpaper: implemented at priority 39, not 24.**
+- KNX-006 (financial_statements) and KND-044 (workpaper) are both **priority 40**. My earlier recommendation wrongly assumed 25.
+- **At 39**, financial_statements beats workpaper and nothing else: 15 catalog / 12 labelled.
+- **Priority 24 would also have flipped 70 files (32 labelled)** away from pbc_request 31, quarterly_report 16, fund_analysis 10, board_materials 9, loc_agreement 2 and journal_import 1. That goes beyond the ruling, so I used 39.
+- If Ryan does want 24, it is a one-number change in 004.
+
+**CYBER-II · retired.**
+- **What assigned it:**
+  - Rules `ENT-018` (name) and `ENT-018P` (folder name), pattern `(?i)AllegisCyber II\y`, priority 30.
+  - `ref.entity_alias` row `CYBER-II → CYBER-II` (source `ryan_alias_map_v1`).
+  - `ref.entity` row `CYBER-II`, which has no name, type or aliases.
+- **Files carrying it:** **1 catalog file, 0 labelled.**
+  - Evidence: "AllegisCyber II" in one folder name and the file name. The pattern is `…/fund portfolio */* ii return */* ii - return *`.
+  - That is CIP-II naming, so it was re-pointed.
+  - No document, label value (live or machine), confirmed entity or party carries CYBER-II.
+- **Changes:**
+  - ENT-018 / ENT-018P v2 → `CIP-II`. After the derive that file has CIP-II, and CYBER-II signals and file entities are both 0.
+  - The alias row is deleted, and `ref.entity` CYBER-II is `active = false` (kept for history).
+  - `labels_setup_wo02.py` leaves inactive entities out of the Parties choices.
+  - At the Part 2 publish, the Entity choice `CYBER-II` (`7f29c48e5a`) is **disabled, not deleted** (`DISABLE_ENTITY_CHOICES`).
+- **Nothing is unclear about CYBER-II, so there is nothing to list for Ryan.**
+- **Found while looking (proposal, not applied):** "Cyber Innovation Partners II" spelled out is assigned no entity by any rule.
+  - **750** catalog files (**331** labelled) have it in the name or a folder and no CIP-II; 1,314 others get CIP-II some other way.
+  - A rule `ENT-019` / `ENT-019P` `(?i)Cyber Innovation Partners,? II\y` → CIP-II would fix them. It needs Ryan's yes, because it adds an entity to files.
+
+**What the Part 2 re-sync will push to Drive** (labelled files whose Find kind now differs from the kind on their label):
+- **613 kind changes in total.**
+  - Approved for Drive: tax_form → tax_return 413, and the remaining ties: workpaper → financial_statements 9, purchase_agreement → safe_or_note 1. The tie count is 10 where I said 6: at priority 39 the financial_statements fix reaches 9 labels (12 labelled files win, 3 already say financial_statements).
+  - From RK1–RK4, all approved:
+    - lpa → operating_agreement 93;
+    - lpa_amendment → operating_agreement_amendment 30;
+    - loc_agreement → quarterly_report 26 and → financial_statements 1;
+    - subscription_agreement → template 26;
+    - correspondence → template 9;
+    - legal_agreement → formation_filing 5.
+- **5,421 labels gain a kind** from the approved no-kind rules.
+- **The RK2 kinds need the two new Kind choices first.** If the publish has not happened, the re-sync skips those values, because unknown choices are not written.
+
+### Still for Ryan (nothing below is applied)
+- **NK03 / Schwab:** add Schwab to the bank list (about 716 → bank_stmt), or leave them for Review. See above.
+- **ENT-019:** spelled-out "Cyber Innovation Partners II" → CIP-II (750 catalog / 331 labelled). See above.
+- **T1 priority:** 39 as implemented, or 24 as literally ruled (70 more files). See above.
 
 **P-K1 · management company K-1s** (the "Mgmt Co / … Investments in …" folders, 407+ K-1s). The files carry no single manco entity, so K1-R1 sets nothing. If Ryan names the management company those folders belong to, a rule can set receiving = that manco and issuing = the fund on the file.
 
@@ -358,7 +420,7 @@ Both reviews ran read-only on `f408e52..cat-wo-02-p2`. Each finding and its fix 
 - **RK1 vs NK07.** 707 of RK1's 720 no-kind files also match NK07 (the "report in a Reports folder" → quarterly_report proposal). If both are approved, RK1 should run first, because it separates quarterly reports from financial statements.
 - **RK2 amendments.** 82 of the 136 are amendments or restatements (54 now `lpa`, 28 `lpa_amendment`); 54 are base agreements. Should amendments become `operating_agreement` too, or a new `operating_agreement_amendment`?
 - **RK2 correspondence.** The 11 `correspondence` files may be cover emails about an operating agreement. Should they be excluded?
-- **RK2 needs a new Kind choice.** That means a choice on the Allegis Document label (49 → 50 of 200 allowed), a `ref.vocab` row, and a label publish.
+- **RK2 needs new Kind choices.** Ruled: two choices (operating_agreement, operating_agreement_amendment) on the Allegis Document label (49 → 51 of 200), added at the Part 2 publish (`NEW_KIND_CHOICES`); there is no `ref.vocab` kind list, `labels_schema.json` takes the new choice ids.
 - **RK3 is a kind, not a Status.** R-022's Status choices are Draft / In review / Final / Issued / Superseded, with no "template". Since `template` already exists as a **kind**, I proposed the kind. If Ryan wants it as a Status, R-022 needs a sixth choice.
 
 ### Deviations / notes (Part 2)

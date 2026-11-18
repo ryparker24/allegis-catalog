@@ -111,44 +111,71 @@ def status_for(kind, executable, name, segs, stage=None):
     return None, None
 
 
-# ------------------------------------------------------------------ item 9 · PROPOSED no-kind rules (F-018)
-# Proposals only: nothing applies these until Ryan rules on each one (NOKIND_RULED stays empty until then).
-# Each rule: (id, kind it would set, folder-segment pattern or None, name pattern or None, plain-words description).
-# A file matches when every given pattern matches (folder: any segment). First match wins, in this order.
+# ------------------------------------------------------------------ item 9 · no-kind rules (F-018), as Ryan ruled them
+# Each rule: (id, kind it sets, folder-segment pattern or None, name pattern or None, plain-words description).
+# A file matches when every given pattern matches (folder: any segment) and the per-rule limits below allow it.
+# Only files with NO kind are touched. First match wins, in this order.
+# Ruled out (Ryan): NK01 (replaced by K1N / K1F), NK09 'wire' (rejected), NK10 / NK11 (0 files; KND-003 / KND-004
+# already cover them), the 'extension' half of NK04 and the PBC half of NK12.
+_RK1_REPORT = r"(‹fin(ancial)? ?(report|rpt)s?›|‹qtr›|‹qtrly›)"
+_RK1_QTR = r"(‹qtr›|‹qtrly›|‹quarter(ly)?›|‹q[1-4]›)"
 NOKIND_RULES = [
-    # K1N / K1F: Ryan approved (CAT-WO-02 item 9 ruling); they replace NK01 ("a folder named for K-1s", any file type)
     ("K1N", "k1", None, r"(‹k-?1(?![0-9])|‹k1s›|‹k-1s›|‹schedule k-?1(?![0-9]))",
-     "the name says K-1 ('K-1', 'K1', 'K-1s', 'Schedule K-1'; not 'K-1065'-style numbers)"),
+     "the name says K-1 ('K-1', 'K1', 'K-1s', 'Schedule K-1'; not 'K-1065'-style numbers); not archives"),
     ("K1F", "k1", r"(‹k-?1'?s?›(?![0-9])|‹k1s›)", None,
      "a folder named for K-1s ('<FY> K-1s', 'K-1s from <auditor>', 'Final K-1s') and the file is a pdf / doc / image"),
     ("NK02", "invoice", None, r"(‹inv(oice)?s?›|‹inv ?#?\d)",
-     "'invoice' / 'inv #' in the name"),
+     "'invoice' / 'inv #' in the name; PDF and Word only"),
     ("NK03", "bank_stmt", r"‹statements?›", r"(‹statements?›|‹stmts?›)",
-     "'statement' in the name, inside a '…Statements' folder (e.g. '…/Mgmt Co/…/<x> Statements/<FY>/')"),
-    ("NK04", "tax_form", None, r"(1042|1099|8804|8805|‹w-?9|‹w-?8|‹extension›|7004|8868)",
-     "a tax-form number or 'extension' in the name"),
+     "'statement' in the name, inside a '…Statements' folder, ONLY in a bank-statement folder ('bank', 'account "
+     "statement', or a bank the catalog knows), never under Financial / Capital / Partner or Capital Account "
+     "Statements or K-1 folders"),
+    ("NK04", "tax_form", None, r"(1042|1099|8804|8805|‹w-?9|‹w-?8|7004|8868)",
+     "a tax-form number in the name (1042, 1099, 8804 / 8805, W-9 / W-8, 7004, 8868); bare 'extension' dropped"),
     ("NK05", "tax_return", r"‹tax returns?›", r"(1065|1120|990|‹returns?›)",
-     "'1065'/'1120'/'990'/'return' in the name, inside a '…Tax Returns…' folder"),
+     "'1065'/'1120'/'990'/'return' in the name, inside a '…Tax Returns…' folder; not archives"),
     ("NK06", "valuation_memo", None, r"(‹valuations?›|409a)",
-     "'valuation' in the name"),
+     "'valuation' / '409A' in the name; PDF and Word only"),
+    # RK1 (approved; runs before NK07): a fin / financial report or 'Qtr' name -> quarterly_report when it also names a
+    # quarter, else financial_statements. Its loc_agreement half is the KND-049 v2 fix in 004 (those files lose the
+    # wrong kind at derive and arrive here with no kind).
+    ("RK1Q", "quarterly_report", None, rf"^(?=.*{_RK1_REPORT})(?=.*{_RK1_QTR})",
+     "RK1: 'Fin Report' / 'Financial Report' / 'Fin Rpt' / 'Qtr' in the name AND a quarter (Qtr / quarter / Q1-Q4)"),
+    ("RK1F", "financial_statements", None, _RK1_REPORT,
+     "RK1: 'Fin Report' / 'Financial Report' / 'Fin Rpt' / 'Qtr' in the name, no quarter"),
     ("NK07", "quarterly_report", r"‹reports?›", r"‹reports?›",
-     "'report' in the name, inside a '…Reports…' folder"),
+     "'report' in the name, inside a '…Reports…' folder (after RK1)"),
     ("NK08", "receipt", None, r"‹receipts?›",
      "'receipt' in the name"),
-    ("NK09", "wire_confirmation", None, r"‹wires?›",
-     "'wire' in the name (e.g. '* - Wire *')"),
-    ("NK10", "capital_call_notice", None, r"(‹capital call›|‹call notice›)",
-     "'capital call' in the name"),
-    ("NK11", "distribution_notice", None, r"‹dist(ribution)? notice›",
-     "'distribution notice' in the name"),
-    ("NK12", "workpaper", r"(‹workpapers?›|‹pbc›)", None,
-     "inside a '…Workpapers…' or '…PBC…' folder"),
+    ("NK12", "workpaper", r"‹workpapers?›", None,
+     "inside a '…Workpapers…' folder (PBC-only folders rejected)"),
 ]
-# the rules Ryan has approved; apply_derive_wo02.py applies these (and only these) by default
-NOKIND_RULED = frozenset({"K1N", "K1F"})
-# a rule limited to some file types (cat.file.file_type_family): a spreadsheet / archive in a K-1 folder is usually a
-# workpaper or an allocation, not a K-1 (Ryan: keep K1F's skip of spreadsheets and archives)
-NK_FAMILIES = {"K1F": frozenset({"pdf", "image", "doc"})}
+# every rule above is approved; apply_derive_wo02.py applies these by default
+NOKIND_RULED = frozenset(r[0] for r in NOKIND_RULES)
+# per-rule file-type limits (cat.file.file_type_family)
+NK_FAMILIES = {"K1F": frozenset({"pdf", "image", "doc"}), "NK02": frozenset({"pdf", "doc"}),
+               "NK06": frozenset({"pdf", "doc"})}
+NK_NOT_FAMILIES = {"K1N": frozenset({"archive"}), "NK05": frozenset({"archive"})}
+# NK03 · bank-statement folders only (Ryan). A bank 'the catalog knows' = the bank-issuer rule's names (ISS-004P),
+# loaded by the caller with set_bank_pattern(); without it only 'bank' / 'account statement' folders count.
+NK03_BANK = W(r"(‹bank|‹account statements?›)")
+NK03_EXCLUDE = W(r"(‹financial statements?›|‹capital statements?›|‹(partner|partners'?|capital) account statements?›|"
+                 r"‹k-?1'?s?›(?![0-9])|‹k1s›)")
+_bank_names = None
+
+
+def set_bank_pattern(pg_pattern):
+    r"""The ISS-004P pattern (Postgres ARE: (?i) and \y); \y -> \b like drive_crawl.derive."""
+    global _bank_names
+    _bank_names = re.compile(pg_pattern.replace("\\y", "\\b")) if pg_pattern else None
+
+
+def nk03_folder(segs):
+    """'bank' / 'account statement' / known-bank folder, and none of the excluded statement or K-1 folders."""
+    if any(NK03_EXCLUDE.search(s) for s in segs): return False
+    return any(NK03_BANK.search(s) or (_bank_names is not None and _bank_names.search(s)) for s in segs)
+
+
 _NK = [(rid, kind, W(frx) if frx else None, W(nrx) if nrx else None, d) for rid, kind, frx, nrx, d in NOKIND_RULES]
 
 
@@ -158,14 +185,41 @@ def nokind_rule(name, segs, only=None, family=None):
     for rid, kind, frx, nrx, _ in _NK:
         if only is not None and rid not in only: continue
         if rid in NK_FAMILIES and (family or "") not in NK_FAMILIES[rid]: continue
+        if rid in NK_NOT_FAMILIES and (family or "") in NK_NOT_FAMILIES[rid]: continue
         if frx and not any(frx.search(s) for s in segs): continue
         if nrx and not nrx.search(n): continue
+        if rid == "NK03" and not nk03_folder(segs): continue
         return rid, kind
     return None, None
 
 
-# ------------------------------------------------------------------ item 9 · PROPOSED re-kind rules (Ryan, live Review queue)
-# Proposals only (scripts/measure_wo02_item9b.py measures them); nothing applies these until Ryan rules.
+# ------------------------------------------------------------------ item 9 · re-kind rules RK2-RK4 (Ryan approved)
+# These CHANGE an existing machine kind (never a person's kind_confirmed). apply_derive_wo02.py runs them over the
+# whole catalog after every derive, before the no-kind rules.
+RK2_OA = W(r"‹operating agreements?›")
+RK2_AMEND = W(r"(‹amend|‹restat)")
+RK3_BOOKLET = W(r"‹subscription (booklet|book|package|docs?)›")
+RK3_BLANK = W(r"(‹blank›|‹form›|‹template›)")
+RK4_FORMATION = W(r"(‹certificate of amendment›|‹name change›|‹de amendment›|‹delaware amendment›|"
+                  r"‹amendment to (the )?certificate›)")
+
+
+def rekind_rule(name, kind, stage=None, issuer=None):
+    """(rule id, new kind) when RK2 / RK3 / RK4 changes this file's kind, else (None, None)."""
+    n = name or ""
+    if RK2_OA.search(n) and kind != "correspondence":                       # RK2: the 11 cover emails stay
+        k = "operating_agreement_amendment" if RK2_AMEND.search(n) else "operating_agreement"
+        return ("RK2", k) if k != kind else (None, None)
+    if (RK3_BOOKLET.search(n) or (issuer == "counsel" and RK3_BLANK.search(n) and kind in ("subscription_agreement", None))) \
+            and stage != "fully_executed" and kind != "template":
+        return "RK3", "template"
+    if RK4_FORMATION.search(n) and kind not in ("tax_return", "tax_form", "formation_filing", "correspondence"):   # cover emails stay, as in RK2
+        return "RK4", "formation_filing"
+    return None, None
+
+
+# ------------------------------------------------------------------ item 9 · re-kind rules RK1-RK4 (Ryan, live Review queue) - APPROVED; plain-words record
+# Implemented above: RK1 = KND-049 v2 (004) + RK1Q / RK1F in NOKIND_RULES; RK2-RK4 = rekind_rule().
 RECLASS_PROPOSALS = [
     ("RK1", "fix KND-049 '(?i)pledge (agreement|fin)' -> '(?i)pledge agreement'; then name 'fin report'/'financial report'/"
             "'qtr' on no-kind or loc_agreement files -> quarterly_report (Qtr / quarter / Qn) else financial_statements"),

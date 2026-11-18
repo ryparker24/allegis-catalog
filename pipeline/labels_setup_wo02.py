@@ -21,10 +21,15 @@ STATUS = {"draft": "Draft", "in_review": "In review", "final": "Final", "issued"
 EXTRA_ISSUING = {"EXTERNAL": "External (third party)"}
 EXTRA_RECEIVING = {"LP": "LP (outside limited partner)", "EXTERNAL": "External (third party)"}
 NEW_EXEC_TITLE = "Status & Execution"
+# item 9 RK2 (Ryan): two new choices on the Allegis Document label's Kind field, published WITH Part 2, not before
+NEW_KIND_CHOICES = {"operating_agreement": "Operating agreement", "operating_agreement_amendment": "Operating agreement amendment"}
+# CYBER-II is not a real entity (AllegisCyber II = CIP-II): its Entity choice is DISABLED at the Part 2 publish, never
+# deleted (a deleted choice would orphan any value already on a file; 0 files carry it today)
+DISABLE_ENTITY_CHOICES = ["CYBER-II"]
 
 
 def ref_lists(cur):
-    cur.execute("SELECT entity_code FROM ref.entity ORDER BY entity_code")
+    cur.execute("SELECT entity_code FROM ref.entity WHERE active IS NOT FALSE ORDER BY entity_code")   # CYBER-II retired
     ents = {r[0]: r[0] for r in cur.fetchall()}
     cur.execute("SELECT portco_code, coalesce(street_name, name) FROM ref.portco WHERE active ORDER BY 2")
     pcos = {r[0]: r[1] for r in cur.fetchall()}
@@ -88,6 +93,8 @@ def main():
     problems = check(max_fields, max_choices, parties, exec_n, exec_new)
     print("design check: " + ("OK" if not problems else "PROBLEMS: " + "; ".join(problems)))
     if mode == "--check" or problems:
+        print(f"Kind: + {len(NEW_KIND_CHOICES)} choices at publish ({', '.join(NEW_KIND_CHOICES)}); "
+              f"Entity: disable {', '.join(DISABLE_ENTITY_CHOICES)} (disable, not delete)")
         print("--check: nothing created, nothing published."); return
     raise SystemExit("--create-drafts / --publish are CAT-WO-02 Part 2 release steps; run them only on Ryan's go-ahead (handoff R-steps).")
 
