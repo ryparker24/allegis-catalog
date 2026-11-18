@@ -5,7 +5,7 @@ import { SidePanel } from "./SidePanel";
 import { VOCAB } from "@/lib/vocab";
 
 type Counts = { stage_unknown?: number; low_confidence_executed?: number; no_kind?: number; open_total?: number; reviewed_today?: number; reviewed_total?: number };
-type Resp = { counts: Counts; page: number; nextPage: number | null; pageRows: number; rows: Row[]; notShown: NotShown; canWrite: boolean };
+export type Resp = { counts: Counts; page: number; nextPage: number | null; pageRows: number; rows: Row[]; notShown: NotShown; canWrite: boolean };
 
 const REASON: Record<string, string> = { stage_unknown: "Stage unknown", low_confidence_executed: "Fully executed (low confidence)", no_kind: "No kind" };
 const SIGNAL: Record<string, string> = {
@@ -37,13 +37,17 @@ export function ReviewClient() {
   const [form, setForm] = useState({ status: "confirmed", stage: "", executed_date: "", note: "" });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // A failed load must show on the page itself (CAT-WO-01.1): the side panel is closed when nothing is selected.
+  const onLoadError = useCallback((e: unknown) => setLoadError(loadErrorText(e)), []);
 
   const load = useCallback(async (skip: string[], page = 0) => {
     const r = await api<Resp>(`/api/review?page=${page}&skip=${encodeURIComponent(skip.join(","))}`);
     setData(r);
+    setLoadError(null);
     setCur(r.rows[0] ?? null);
   }, []);
-  useEffect(() => { const s = loadSkipped(); setSkipped(s); load(s).catch((e) => setMsg(e.message)); }, [load]);
+  useEffect(() => { const s = loadSkipped(); setSkipped(s); load(s).catch(onLoadError); }, [load, onLoadError]);
   useEffect(() => {
     if (!cur) return;
     const stage = cur.stage && cur.stage !== "unknown" ? cur.stage : cur.stage_suggested && cur.stage_suggested !== "unknown" ? cur.stage_suggested : "";
@@ -60,7 +64,7 @@ export function ReviewClient() {
     setSkipped(s);
     try { sessionStorage.setItem(SKIP_KEY, JSON.stringify(s)); } catch { /* storage unavailable: skip for this view only */ }
     const n = next(data.rows, cur.file_id);
-    if (n) setCur(n); else load(s, data.page).catch((e) => setMsg(e.message));
+    if (n) setCur(n); else load(s, data.page).catch(onLoadError);
   };
   const confirm = async () => {
     if (!cur) return;
@@ -68,13 +72,39 @@ export function ReviewClient() {
     try {
       await api("/api/review/confirm", { method: "POST", body: JSON.stringify({ file_id: cur.file_id, ...form, stage: form.stage || null, executed_date: form.executed_date || null, note: form.note || null }) });
       setMsg("Saved to Drive.");
-      await load(skipped, data?.page ?? 0);
     } catch (e) {
       const b = (e as { body?: { error?: string; reason?: string; drive_status?: number } }).body;
       setMsg(`Not saved: ${b?.reason ?? b?.error ?? (e as Error).message}${b?.drive_status ? ` (Drive ${b.drive_status})` : ""}`);
-    } finally { setBusy(false); }
+      setBusy(false);
+      return;
+    }
+    await load(skipped, data?.page ?? 0).catch(onLoadError); // the save succeeded; a reload failure is a load error, not "Not saved"
+    setBusy(false);
   };
 
+  return (
+    <ReviewView data={data} cur={cur} skipped={skipped} form={form} busy={busy} msg={msg} loadError={loadError}
+      setCur={setCur} setForm={setForm} onConfirm={confirm} onSkip={skip}
+      onNextPage={(p) => load(skipped, p).catch(onLoadError)} />
+  );
+}
+
+/** Error codes only (the API returns codes such as forbidden / bad_origin / access_google_mismatch, never file data). */
+export function loadErrorText(e: unknown): string {
+  const err = e as { message?: string; status?: number; body?: { error?: string; reason?: string } };
+  const code = err.body?.error ?? err.message ?? "unknown_error";
+  const reason = err.body?.reason && err.body.reason !== code ? ` (${err.body.reason})` : "";
+  return `${code}${reason}${err.status ? `, HTTP ${err.status}` : ""}`;
+}
+
+type Form = { status: string; stage: string; executed_date: string; note: string };
+export interface ReviewViewProps {
+  data: Resp | null; cur: Row | null; skipped: string[]; form: Form; busy: boolean; msg: string | null; loadError?: string | null;
+  setCur: (r: Row | null) => void; setForm: (f: Form) => void; onConfirm: () => void; onSkip: () => void; onNextPage: (page: number) => void;
+}
+
+/** Presentational part of the Review page (no fetching), so it can be rendered in tests. */
+export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, setCur, setForm, onConfirm, onSkip, onNextPage }: ReviewViewProps) {
   const c = data?.counts ?? {};
   return (
     <div className="review">
@@ -86,6 +116,11 @@ export function ReviewClient() {
         <div className="ctr"><b>{(c.reviewed_today ?? 0).toLocaleString()}</b><span>reviewed today</span></div>
         <div className="ctr"><b>{skipped.length}</b><span>skipped (this session)</span></div>
       </div>
+      {loadError ? (
+        <div className="status error" role="alert">
+          Could not load the review queue: {loadError}. Reload the page to try again; if it keeps failing, sign in again.
+        </div>
+      ) : null}
       {data?.notShown.total ? (
         <div className="status warn">
           {data.notShown.noAccess ? `${data.notShown.noAccess} not shown (no access)` : ""}{data.notShown.noAccess && data.notShown.checkFailed ? " · " : ""}
@@ -108,7 +143,7 @@ export function ReviewClient() {
         </table>
         {cur ? (
           <SidePanel row={cur} onClose={() => setCur(null)}>
-            <form className="review-form" onSubmit={(e) => { e.preventDefault(); confirm(); }}>
+            <form className="review-form" onSubmit={(e) => { e.preventDefault(); onConfirm(); }}>
               <p className="why"><b>Why:</b> {why(cur)}</p>
               <fieldset>
                 <legend>Execution label</legend>
@@ -131,12 +166,12 @@ export function ReviewClient() {
               </fieldset>
               <div className="actions">
                 <button className="btn primary" type="submit" disabled={busy}>{data?.canWrite ? "Confirm and next" : "Confirm and next (asks for label-write access once)"}</button>
-                <button className="btn" type="button" onClick={skip} disabled={busy}>Skip</button>
+                <button className="btn" type="button" onClick={onSkip} disabled={busy}>Skip</button>
               </div>
               {msg ? <p className="status">{msg}</p> : null}
             </form>
           </SidePanel>
-        ) : data && !data.rows.length ? <p className="center muted">Nothing shown on this page.{data.nextPage != null ? <> <button onClick={() => load(skipped, data.nextPage!).catch((e) => setMsg(e.message))}>Next page</button></> : null}</p> : null}
+        ) : data && !data.rows.length ? <p className="center muted">Nothing shown on this page.{data.nextPage != null ? <> <button onClick={() => onNextPage(data.nextPage!)}>Next page</button></> : null}</p> : null}
       </div>
     </div>
   );

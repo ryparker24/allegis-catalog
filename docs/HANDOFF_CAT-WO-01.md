@@ -349,3 +349,24 @@ The 302 comes from Cloudflare Access, not the Worker, so Access sits in front of
 2. The screenshots from the order can be taken then.
 3. Keep `pre-catwo01` until Ryan is satisfied, then delete it.
 4. The local scratch files that held branch and main credentials during the release are deleted.
+
+## CAT-WO-01.1 hotfix: Review page "shows no files"
+
+**Diagnosis (counts and codes only):**
+- (c) The queue view on main, read as `catalog_app`, has 19,089 open rows (342 / 330 / 18,417). The first page is all normal tier.
+- `wrangler tail` captured two of Ryan's reloads:
+  - `GET /api/review` page=0, skip=0 ids, 200, with log `review_page` count=50, dropped_no_access=0, dropped_check_failed=0.
+  - This rules out (a) the 409 consent path, (b) the live check dropping every row, and (d) paging/skip state.
+- A browser check (element counts only) showed counters 19,089 / 342 / 330 / 18,417, 50 rows, and the side panel open.
+- The captured window has no failed requests. The earlier empty loads were not captured, so the original failure is **not reproduced**.
+
+**Defect fixed:**
+- **Before:** a failed Review load set an error that was rendered only inside the side panel. The panel is closed when no row is selected, which is always the case after a failed first load. The page therefore looked like an empty queue with every counter at 0.
+- **After:**
+  - Load failures (first load, Next page, the reload after Skip, the reload after a save) set a page-level `role="alert"` banner above the table: "Could not load the review queue: <error code> (<reason>), HTTP <status>".
+  - A save that succeeded but was followed by a failed reload is no longer reported as "Not saved".
+  - The page body was extracted into the presentational `ReviewView` so it can be rendered in tests.
+- **Tests:**
+  - `test/review_load_error.test.ts` failed first against the unfixed view (2 of 3 failed: no alert rendered) and passes after the fix.
+  - The suite passes 48/48 and tsc is clean.
+- **Deploy:** Worker version `b3400283-c8a6-4f80-9491-f738a0760ec4`.
