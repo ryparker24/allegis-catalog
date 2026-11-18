@@ -328,7 +328,8 @@ input[type=checkbox] { accent-color: var(--ink); width: 14px; height: 14px; marg
 button.ctr.kpi { font: inherit; text-align: left; color: var(--ink); cursor: pointer; }
 .ctr.kpi.link-card:hover { border-color: rgba(28,28,28,.4); }
 .ctr.kpi.link-card.on { border-color: var(--ink); box-shadow: inset 3px 0 0 var(--signal), var(--shadow-card); }
-.grid
+.grid.queue td.why { color: var(--muted); font-size: 12px; }
+
 /* designer review (Review queue) */
 .ctr.kpi .k-exp { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ctr.kpi.link-card:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
