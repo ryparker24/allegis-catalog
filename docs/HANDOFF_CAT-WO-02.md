@@ -176,6 +176,22 @@ So the read-back's first run has nothing person-set to pick up.
     - A re-run simply recomputes the difference, so it is safe to resume.
   - Both need an explicit `--db-url-file`, so they can never pick up main by default. Both stream Drive results per batch, which keeps memory flat.
 
+### Review queue pieces (items 6 and 8, built after the CAT-WO-01.1 rebase)
+- **Only a review takes a file out of the queue.** `app.v_find.reviewed` now counts only `confirmed` / `wrong` events, so a bulk edit (`edited`) leaves the file in the queue. "Reviewed today" / "reviewed total" count reviews only. This is in 004, which restates `security_barrier`: a first run without it dropped the option on the branch, and the run with it restored it.
+- **"Status unknown" lane (R-022):** a kind is known, it is not an executable kind, and it has no Status.
+  - **26,498** labelled files on the branch; the other lanes are 331 / 329 / 12,996.
+  - It is shown after "Stage unknown" (card, lane filter, Why text), as the order says.
+  - It is ranked **last** in the default queue order (`queue_rank` 4), so the small lanes stay first. A lane filter shows it on its own.
+  - The list has a sortable **Status** column.
+- **Form: Stage or Status.** Stage (Execution label) for executable kinds and the "Stage unknown" lane; Status (Status & Execution) for the rest. The Status-unknown lane always gets Status.
+  - Until the Status field is published, the select is disabled with a note, and `/api/review/confirm` refuses `doc_status` (`label_not_published:exec.status`). Confirm still records the review.
+  - A write never carries both Stage and Status. The Status written is logged in `review_event.edits`.
+- **Item 8 in the Review form:** the same Edit labels form as Find, logged with `source = review_edit`. Saving marks the file Confirmed, so it leaves the queue on the next load.
+- **Tests:** vitest 91/91, covering the lane and sort whitelist, the page columns, the `doc_status` refusals, Stage vs Status in the form, and the card order.
+- **Checked on the branch as `catalog_app`:**
+  - a Status-unknown page returns 25 rows, with `requires_execution` false or NULL and no status;
+  - the queue count runs in 0.6 s.
+
 ### Guard tests (Part 2)
 - **G-E1 `test_edit_writes_only_allowed_labels`** (`test/wo02_part2.test.ts`):
   - an edit touches doc / exec / review only, never Handling;
@@ -429,7 +445,6 @@ Measured with `scripts/measure_wo02_item9d.py`, run after 004 + `derive` and bef
   - the app refuses edits to those fields (`label_not_published`);
   - Find shows their catalog values instead of live label values;
   - the re-sync skips them.
-- **Item 6 / 8 Review pieces deferred** until the hotfix is on main: the Review queue's "Status unknown" lane, and Stage-or-Status in the Review form.
 - **One read on main.** The labels_setup check's first run read `ref.entity` / `ref.portco` codes from main through `drive_crawl.db()` (read-only). It now takes `--db-url-file` and was re-run against the branch with the same result.
 
 ### Appendix A · item 9, top 50 folder paths among no-kind files (codes and generic words only)

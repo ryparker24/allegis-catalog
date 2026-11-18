@@ -5,16 +5,17 @@
  */
 import { buildWhere, pageSizeOf, parseSpec, SpecError, type FindSpec } from "./find";
 
-export const LANES = ["stage_unknown", "low_confidence_executed", "no_kind"] as const;
+// display order (R-022: "Status unknown" right after signing stage unknown); the default QUEUE order is queue_rank in the view
+export const LANES = ["stage_unknown", "status_unknown", "low_confidence_executed", "no_kind"] as const;
 const SORT: Record<string, string> = {
   queue: "queue_rank, confidence_rank",
   queue_reason: "queue_rank",
   confidence: "confidence_rank",
-  kind: "kind", stage: "stage", fiscal_year: "fiscal_year", modified_time: "modified_time", entities: "entities", file_id: "file_id",
+  kind: "kind", stage: "stage", status: "status", fiscal_year: "fiscal_year", modified_time: "modified_time", entities: "entities", file_id: "file_id",
 };
 export const REVIEW_SORTABLE = Object.keys(SORT);
 /** Review list columns (widths saved per user, item 2). */
-export const REVIEW_COLUMNS = ["name", "why", "stage", "kind", "entities", "fiscal_year", "confidence"];
+export const REVIEW_COLUMNS = ["name", "why", "stage", "status", "kind", "entities", "fiscal_year", "confidence"];
 
 export interface ReviewSpec { spec: FindSpec; lanes: string[] }
 
@@ -52,7 +53,8 @@ export function reviewQuery(r: ReviewSpec, skip: string[], page: number): { sql:
     params, pageSize,
     countSql: `SELECT count(*)::int AS n FROM app.v_review_queue WHERE ${parts.join(" AND ")}`,
     sql: `SELECT file_id, document_id, kind, entities, portcos, fiscal_year, period, stage, signed_date, effective_date, workstream, issuer,
-                 tier, is_primary, modified_time, file_type_family, queue_reason, signals, confidence, stage_suggested
+                 tier, is_primary, modified_time, file_type_family, queue_reason, signals, confidence, stage_suggested,
+                 requires_execution, status
           FROM app.v_review_queue WHERE ${parts.join(" AND ")}
           ORDER BY ${order}, file_id LIMIT ${pageSize} OFFSET ${page * pageSize}`,
   };

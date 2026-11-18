@@ -111,8 +111,11 @@ export interface ReviewInput {
   stage: (typeof STAGES)[number] | null;
   executedDate: string | null; // YYYY-MM-DD
   note: string | null;
+  /** R-022 Status (non-executable kinds), written on Status & Execution; refused until that field is published */
+  docStatus?: (typeof DOC_STATUSES)[number] | null;
   reviewerEmail: string;
 }
+export const DOC_STATUSES = ["draft", "in_review", "final", "issued", "superseded"] as const;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 export function validateReview(x: unknown): { ok: true; value: Omit<ReviewInput, "reviewerEmail"> } | { ok: false; reason: string } {
@@ -125,7 +128,11 @@ export function validateReview(x: unknown): { ok: true; value: Omit<ReviewInput,
   if (executedDate !== null && stage !== "fully_executed") return { ok: false, reason: "executed_date_needs_fully_executed" };
   const note = o.note == null || o.note === "" ? null : String(o.note);
   if (note !== null && note.length > 2000) return { ok: false, reason: "note_too_long" };
-  return { ok: true, value: { status: o.status, stage: stage as ReviewInput["stage"], executedDate, note } };
+  const docStatus = o.doc_status == null || o.doc_status === "" ? null : String(o.doc_status);
+  if (docStatus !== null && !(DOC_STATUSES as readonly string[]).includes(docStatus)) return { ok: false, reason: "doc_status" };
+  if (docStatus !== null && !hasField("exec", "status")) return { ok: false, reason: "label_not_published:exec.status" };
+  if (docStatus !== null && stage !== null) return { ok: false, reason: "stage_or_status" };   // the form sends one, never both
+  return { ok: true, value: { status: o.status, stage: stage as ReviewInput["stage"], executedDate, note, docStatus: docStatus as ReviewInput["docStatus"] } };
 }
 
 function dateValue(s: string) {
@@ -133,7 +140,7 @@ function dateValue(s: string) {
   return { year, month, day };
 }
 
-/** Builds files.modifyLabels labelModifications. Touches ONLY the Execution and Catalog Review labels. */
+/** Builds files.modifyLabels labelModifications. Touches ONLY the (Status &) Execution and Catalog Review labels. */
 export function buildReviewMods(r: ReviewInput): { labelModifications: unknown[]; labels: ("exec" | "review")[] } {
   const E = S.exec.fields, R = S.review.fields;
   const mods: unknown[] = [];
@@ -144,6 +151,10 @@ export function buildReviewMods(r: ReviewInput): { labelModifications: unknown[]
     else if (r.stage !== "fully_executed") fm.push({ fieldId: E.executed_date.field_id, unsetValues: true });
     // (fully executed with no date given: an executed date already on the label is left as it is)
     mods.push({ labelId: S.exec.label_id, fieldModifications: fm });
+    labels.push("exec");
+  } else if (r.docStatus && hasField("exec", "status")) {
+    const st = S.exec.fields.status;
+    mods.push({ labelId: S.exec.label_id, fieldModifications: [{ fieldId: st.field_id, setSelectionValues: [st.choices![r.docStatus]] }] });
     labels.push("exec");
   }
   mods.push({

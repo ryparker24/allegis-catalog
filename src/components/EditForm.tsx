@@ -47,8 +47,9 @@ export function FieldInput({ f, value, onChange }: { f: FieldInfo; value: Val; o
   return <input className="input" type="date" value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value || null)} aria-label={f.title} />;
 }
 
-/** Item 8 · single edit in Find's side panel. Writes the labels on the file as you and marks it Confirmed. */
-export function EditForm({ row, onSaved }: { row: Row; onSaved: (patch: Partial<Row>) => void }) {
+/** Item 8 · single edit in Find's side panel and the Review form. Writes the labels on the file as you and marks it Confirmed. */
+/** source: where the edit was made (logged on app.review_event): Find's side panel or the Review form. */
+export function EditForm({ row, onSaved, source = "find_single" }: { row: Row; onSaved: (patch: Partial<Row>) => void; source?: "find_single" | "review_edit" }) {
   const [info, setInfo] = useState<{ fields: FieldInfo[]; canWrite: boolean } | null>(null);
   const [vals, setVals] = useState<Record<string, Val>>({});
   const [busy, setBusy] = useState(false);
@@ -65,7 +66,7 @@ export function EditForm({ row, onSaved }: { row: Row; onSaved: (patch: Partial<
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      await api("/api/edit", { method: "POST", body: JSON.stringify({ file_id: row.file_id, set: changed }) });
+      await api("/api/edit", { method: "POST", body: JSON.stringify({ file_id: row.file_id, set: changed, source }) });
       onSaved({ ...(changed as Partial<Row>), review_status: "confirmed" });
       setVals({}); setMsg("Saved on the file in Drive, and marked Confirmed.");
     } catch (e) {

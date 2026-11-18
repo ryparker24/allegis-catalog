@@ -198,3 +198,105 @@ UPDATE ref.entity SET active = false,
        notes = concat_ws(' · ', nullif(notes, ''), 'CAT-WO-02: retired, not a real entity; AllegisCyber II = CIP-II')
 WHERE entity_code = 'CYBER-II' AND active IS DISTINCT FROM false;
 COMMIT;
+
+-- ---------------------------------------------------------------- item 6 / item 8 · Review queue (after the CAT-WO-01.1 rebase)
+-- (a) only 'confirmed' / 'wrong' take a file out of the queue: a bulk edit ('edited') changed a field but nobody reviewed
+--     the file. v_find is the live definition with that one change; security_barrier is restated (CREATE OR REPLACE
+--     without WITH would drop it - caught on the branch) and grants are unchanged.
+-- (b) R-022 "Status unknown" lane: a non-executable kind with no Status. Shown after "Signing status unknown" in the
+--     lane list; ranked LAST in the default order (26k labelled files would otherwise bury the smaller lanes).
+-- (c) counts: + status_unknown; reviewed_today / reviewed_total count reviews only (not bulk edits).
+BEGIN;
+CREATE OR REPLACE VIEW app.v_find WITH (security_barrier = true) AS
+SELECT f.file_id,
+    d.document_id,
+    f.web_view_link,
+    f.mime_type,
+    f.file_type_family,
+    f.modified_time,
+    f.handling AS tier,
+    COALESCE(d.kind_confirmed, d.kind_auto) AS kind,
+    COALESCE(d.fiscal_year_confirmed, d.fiscal_year_auto) AS fiscal_year,
+        CASE
+            WHEN (COALESCE(d.fiscal_quarter_confirmed, d.fiscal_quarter_auto) IS NOT NULL) THEN ('q'::text || COALESCE(d.fiscal_quarter_confirmed, d.fiscal_quarter_auto))
+            WHEN COALESCE(d.fye_flag_confirmed, d.fye_flag_auto) THEN 'fy'::text
+            ELSE NULL::text
+        END AS period,
+    COALESCE(d.effective_date_confirmed, d.effective_date_auto) AS effective_date,
+    COALESCE(d.workstream_confirmed, d.workstream_auto) AS workstream,
+    COALESCE(d.issuer_confirmed, d.issuer_auto) AS issuer,
+    COALESCE(d.requires_execution_confirmed, d.requires_execution_auto) AS requires_execution,
+    COALESCE(d.execution_stage_confirmed, d.execution_stage_auto) AS stage,
+    COALESCE(d.signed_date_confirmed, d.signed_date_auto) AS signed_date,
+    COALESCE(d.pii_lp_flag_confirmed, d.pii_lp_flag_auto) AS pii_lp,
+    COALESCE(ent.codes, '{}'::text[]) AS entities,
+    COALESCE(pco.codes, '{}'::text[]) AS portcos,
+    (fd.file_role = 'primary'::text) AS is_primary,
+    chk.confidence,
+    chk.stage_suggested,
+    COALESCE(chk.signals, '{}'::text[]) AS signals,
+    (EXISTS ( SELECT 1
+           FROM app.review_event r
+          WHERE ((r.file_id = f.file_id) AND (r.status = ANY (ARRAY['confirmed'::text, 'wrong'::text]))))) AS reviewed
+   FROM ((((((app.labelled_file lf
+     JOIN cat.file f ON ((f.file_id = lf.file_id)))
+     LEFT JOIN cat.file_document fd ON ((fd.file_id = f.file_id)))
+     LEFT JOIN cat.document d ON ((d.document_id = fd.document_id)))
+     LEFT JOIN ( SELECT e.file_id,
+            array_agg(DISTINCT e.entity_code ORDER BY e.entity_code) AS codes
+           FROM (cat.v_file_entity e
+             JOIN app.labelled_file l2 ON ((l2.file_id = e.file_id)))
+          GROUP BY e.file_id) ent ON ((ent.file_id = f.file_id)))
+     LEFT JOIN ( SELECT p.file_id,
+            array_agg(DISTINCT p.portco_code ORDER BY p.portco_code) AS codes
+           FROM (cat.v_file_portco p
+             JOIN app.labelled_file l3 ON ((l3.file_id = p.file_id)))
+          GROUP BY p.file_id) pco ON ((pco.file_id = f.file_id)))
+     LEFT JOIN cat.doc_content_check chk ON ((chk.document_id = d.document_id)))
+  WHERE ((COALESCE(f.handling, 'secret'::text) <> 'secret'::text) AND (f.removed_run IS NULL) AND (f.trashed IS NOT TRUE) AND (f.is_shortcut IS NOT TRUE));
+
+CREATE OR REPLACE VIEW app.v_review_queue WITH (security_barrier = true) AS
+ SELECT file_id, document_id, web_view_link, mime_type, file_type_family, modified_time, tier, kind, fiscal_year, period,
+    effective_date, workstream, issuer, requires_execution, stage, signed_date, pii_lp, entities, portcos, is_primary,
+    confidence, stage_suggested, signals, reviewed, queue_reason,
+        CASE queue_reason
+            WHEN 'stage_unknown'::text THEN 1
+            WHEN 'low_confidence_executed'::text THEN 2
+            WHEN 'no_kind'::text THEN 3
+            ELSE 4
+        END AS queue_rank,
+        CASE confidence
+            WHEN 'none'::text THEN 0
+            WHEN 'low'::text THEN 1
+            WHEN 'medium'::text THEN 2
+            WHEN 'high'::text THEN 3
+            ELSE 4
+        END AS confidence_rank,
+    status
+   FROM ( SELECT v.file_id, v.document_id, v.web_view_link, v.mime_type, v.file_type_family, v.modified_time, v.tier, v.kind,
+            v.fiscal_year, v.period, v.effective_date, v.workstream, v.issuer, v.requires_execution, v.stage, v.signed_date,
+            v.pii_lp, v.entities, v.portcos, v.is_primary, v.confidence, v.stage_suggested, v.signals, v.reviewed,
+            COALESCE(d.status_confirmed, d.status_auto) AS status,
+                CASE
+                    WHEN (v.requires_execution AND (v.stage = 'unknown'::text)) THEN 'stage_unknown'::text
+                    WHEN ((v.stage = 'fully_executed'::text) AND (v.confidence = 'low'::text)) THEN 'low_confidence_executed'::text
+                    WHEN (v.kind IS NULL) THEN 'no_kind'::text
+                    WHEN (NOT COALESCE(v.requires_execution, false) AND COALESCE(d.status_confirmed, d.status_auto) IS NULL) THEN 'status_unknown'::text
+                    ELSE NULL::text
+                END AS queue_reason
+           FROM app.v_find v
+           LEFT JOIN cat.document d ON d.document_id = v.document_id
+          WHERE (NOT v.reviewed)) q
+  WHERE (queue_reason IS NOT NULL);
+
+CREATE OR REPLACE VIEW app.v_review_counts AS
+ SELECT ( SELECT count(*)::integer FROM app.v_review_queue WHERE queue_reason = 'stage_unknown'::text) AS stage_unknown,
+    ( SELECT count(*)::integer FROM app.v_review_queue WHERE queue_reason = 'low_confidence_executed'::text) AS low_confidence_executed,
+    ( SELECT count(*)::integer FROM app.v_review_queue WHERE queue_reason = 'no_kind'::text) AS no_kind,
+    ( SELECT count(*)::integer FROM app.v_review_queue) AS open_total,
+    ( SELECT count(*)::integer FROM app.review_event r JOIN app.v_find v USING (file_id)
+       WHERE r.created_at >= date_trunc('day'::text, now()) AND r.status = ANY (ARRAY['confirmed'::text, 'wrong'::text])) AS reviewed_today,
+    ( SELECT count(DISTINCT r.file_id)::integer FROM app.review_event r JOIN app.v_find v USING (file_id)
+       WHERE r.status = ANY (ARRAY['confirmed'::text, 'wrong'::text])) AS reviewed_total,
+    ( SELECT count(*)::integer FROM app.v_review_queue WHERE queue_reason = 'status_unknown'::text) AS status_unknown;
+COMMIT;

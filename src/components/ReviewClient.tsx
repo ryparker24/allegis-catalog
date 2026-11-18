@@ -1,17 +1,20 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, show, type NotShown, type Row } from "./client";
 import { SidePanel } from "./SidePanel";
 import { PageHeader } from "./AppShell";
 import { pageList, PickList, Pop, RangeInputs } from "./FindClient";
 import { shownName } from "./bus";
 import { Icon } from "./icons";
+import { EditForm, editInfo } from "./EditForm";
 import { VOCAB, display, type VocabList } from "@/lib/vocab";
 
-type Counts = { stage_unknown?: number; low_confidence_executed?: number; no_kind?: number; open_total?: number; reviewed_today?: number; reviewed_total?: number };
+type Counts = { stage_unknown?: number; status_unknown?: number; low_confidence_executed?: number; no_kind?: number; open_total?: number; reviewed_today?: number; reviewed_total?: number };
 export type Resp = { counts: Counts; page: number; pageSize?: number; matched?: number; nextPage: number | null; pageRows: number; rows: Row[]; notShown: NotShown; canWrite: boolean };
 
-const REASON: Record<string, string> = { stage_unknown: "Stage unknown", low_confidence_executed: "Fully executed (low confidence)", no_kind: "No kind" };
+// lane order as shown (R-022: "Status unknown" right after signing stage unknown)
+const REASON: Record<string, string> = { stage_unknown: "Stage unknown", status_unknown: "Status unknown", low_confidence_executed: "Fully executed (low confidence)", no_kind: "No kind" };
+const DOC_STATUSES = ["draft", "in_review", "final", "issued", "superseded"] as const;
 const SIGNAL: Record<string, string> = {
   sig_block: "signature block found", sig_page_image: "signature page is an image", scanned: "scanned", blank_line: "blank signature line",
   docusign: "DocuSign", digital_sig: "digital signature", exec_version: "'executed' in name", conformed: "conformed (/s/)", draft_mark: "draft mark",
@@ -37,6 +40,7 @@ const COLS: Col[] = [
   { key: "name", label: "File", width: 300 },
   { key: "why", label: "Why", width: 300, sort: "queue", filter: "lane" },
   { key: "stage", label: "Signing stage", width: 150, sort: "stage", filter: "stage" },
+  { key: "status", label: "Status", width: 120, sort: "status" },
   { key: "kind", label: "Kind", width: 160, sort: "kind", filter: "kind" },
   { key: "entities", label: "Entity", width: 120, sort: "entities", filter: "entity" },
   { key: "fiscal_year", label: "Fiscal year", width: 100, sort: "fiscal_year", filter: "fy" },
@@ -50,7 +54,7 @@ function why(r: Row): string {
   if (r.stage_suggested && r.stage_suggested !== "unknown") parts.push(`scan suggests ${show("stage", r.stage_suggested)}`);
   const sig = (r.signals ?? []).map((s) => SIGNAL[s] ?? s);
   if (sig.length) parts.push(sig.join(", "));
-  else if (r.queue_reason !== "no_kind") parts.push("no scan signals");
+  else if (r.queue_reason !== "no_kind" && r.queue_reason !== "status_unknown") parts.push("no scan signals");
   return parts.join(" · ");
 }
 function loadSkipped(): string[] {
@@ -63,7 +67,8 @@ export function ReviewClient() {
   const [data, setData] = useState<Resp | null>(null);
   const [cur, setCur] = useState<Row | null>(null);
   const [skipped, setSkipped] = useState<string[]>([]);
-  const [form, setForm] = useState({ status: "confirmed", stage: "", executed_date: "", note: "" });
+  const [form, setForm] = useState<Form>({ status: "confirmed", stage: "", executed_date: "", note: "", doc_status: "" });
+  const [statusPublished, setStatusPublished] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -93,6 +98,7 @@ export function ReviewClient() {
   // start: the last list state for this user (item 2), then the first page
   useEffect(() => {
     api<Record<string, Facet[]>>("/api/facets").then(setFacets).catch(() => {});
+    editInfo().then((i) => setStatusPublished(!!i.fields.find((f) => f.key === "status")?.published)).catch(() => {});
     (async () => {
       try {
         const p = await api<{ value: Partial<ReviewListState> & { lanes?: string[] } | null }>("/api/prefs?key=review");
@@ -127,7 +133,7 @@ export function ReviewClient() {
   useEffect(() => {
     if (!cur) return;
     const stage = cur.stage && cur.stage !== "unknown" ? cur.stage : cur.stage_suggested && cur.stage_suggested !== "unknown" ? cur.stage_suggested : "";
-    setForm({ status: "confirmed", stage, executed_date: cur.executed_date ?? "", note: "" });
+    setForm({ status: "confirmed", stage, executed_date: cur.executed_date ?? "", note: "", doc_status: cur.status ?? "" });
   }, [cur]);
 
   const next = (rows: Row[], fromId: string) => {
@@ -151,7 +157,13 @@ export function ReviewClient() {
     if (!cur) return;
     setBusy(true); setMsg(null);
     try {
-      await api("/api/review/confirm", { method: "POST", body: JSON.stringify({ file_id: cur.file_id, ...form, stage: form.stage || null, executed_date: form.executed_date || null, note: form.note || null }) });
+      // R-022: Stage for executable kinds, Status for the rest - the write carries one or the other, never both
+      const exec = isExecutable(cur);
+      await api("/api/review/confirm", { method: "POST", body: JSON.stringify({
+        file_id: cur.file_id, status: form.status, note: form.note || null,
+        stage: exec ? form.stage || null : null, executed_date: exec ? form.executed_date || null : null,
+        doc_status: !exec && statusPublished && form.doc_status && form.doc_status !== (cur.status ?? "") ? form.doc_status : null,
+      }) });
       setMsg("Saved to Drive.");
     } catch (e) {
       const b = (e as { body?: { error?: string; reason?: string; drive_status?: number } }).body;
@@ -168,7 +180,8 @@ export function ReviewClient() {
       setCur={setCur} setForm={setForm} onConfirm={confirm} onSkip={skip}
       onNextPage={(p) => load(skipped, p, { back: !!data && p < data.page }).catch(onLoadError)}
       onPrevPage={() => data && load(skipped, prevPage(data.page), { back: true }).catch(onLoadError)}
-      list={list} setList={setList} facets={facets} onClearSkipped={clearSkipped} />
+      list={list} setList={setList} facets={facets} onClearSkipped={clearSkipped} statusPublished={statusPublished}
+      editSlot={cur ? <EditForm key={cur.file_id} row={cur} source="review_edit" onSaved={() => { load(skipped, data?.page ?? 0).catch(onLoadError); }} /> : null} />
   );
 }
 
@@ -180,13 +193,18 @@ export function loadErrorText(e: unknown): string {
   return `${code}${reason}${err.status ? `, HTTP ${err.status}` : ""}`;
 }
 
-type Form = { status: string; stage: string; executed_date: string; note: string };
+type Form = { status: string; stage: string; executed_date: string; note: string; doc_status?: string };
+/** Stage applies to executable kinds; everything else gets a Status (R-022). The lane decides first (the view's
+ *  status_unknown also covers requires_execution = NULL); otherwise not known as non-executable: Stage, as before. */
+export const isExecutable = (r: Row) =>
+  r.queue_reason === "stage_unknown" || (r.queue_reason !== "status_unknown" && r.requires_execution !== false);
 export interface ReviewViewProps {
   data: Resp | null; cur: Row | null; skipped: string[]; form: Form; busy: boolean; msg: string | null; loadError?: string | null;
   setCur: (r: Row | null) => void; setForm: (f: Form) => void; onConfirm: () => void; onSkip: () => void; onNextPage: (page: number) => void;
   // CAT-WO-02 (optional, so the CAT-WO-01.1 render tests keep their props)
   list?: ReviewListState; setList?: (u: ReviewListState | ((l: ReviewListState) => ReviewListState)) => void;
   facets?: Record<string, Facet[]> | null; onClearSkipped?: () => void; onPrevPage?: () => void;
+  statusPublished?: boolean; editSlot?: ReactNode;
 }
 
 /** Dashboard-style counter card (Datum): caption, big number, one-line explanation. A lane card filters the list. */
@@ -198,7 +216,7 @@ function Kpi({ cap, n, exp, on, onClick }: { cap: string; n: number; exp: string
 }
 
 /** Presentational part of the Review page (no fetching), so it can be rendered in tests. */
-export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, setCur, setForm, onConfirm, onSkip, onNextPage, list = DEFAULT_LIST, setList, facets, onClearSkipped, onPrevPage }: ReviewViewProps) {
+export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, setCur, setForm, onConfirm, onSkip, onNextPage, list = DEFAULT_LIST, setList, facets, onClearSkipped, onPrevPage, statusPublished = false, editSlot }: ReviewViewProps) {
   const c = data?.counts ?? {};
   const [pop, setPop] = useState<string | null>(null);
   const [popAt, setPopAt] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
@@ -269,7 +287,7 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
     <div className="review">
       <PageHeader
         title="Review queue"
-        info={<>Files the catalog wants a person to check, most uncertain first: signing stage unknown, then fully executed at low confidence, then no kind. Each page is checked live against Drive as you; Confirm writes the Execution and Catalog Review labels on the file.</>}
+        info={<>Files the catalog wants a person to check, most uncertain first: signing stage unknown, then fully executed at low confidence, then no kind, then status unknown. Each page is checked live against Drive as you; Confirm writes the Stage (or Status) and Catalog Review labels on the file. A bulk edit does not take a file out of the queue; only Confirmed or Wrong does.</>}
         actions={setList ? <>
           <div className="pop-wrap">
             <button className="btn" aria-label="More actions" aria-expanded={pop === "more"} onClick={() => setPop(pop === "more" ? null : "more")}><Icon name="more" /></button>
@@ -283,6 +301,7 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
       <div className="counters">
         <Kpi cap="Open" n={c.open_total ?? 0} exp="Files waiting for a person, across all lanes." on={!!setList && !list.lanes.length} onClick={setList ? () => upd({ lanes: [] }) : undefined} />
         <Kpi cap="Stage unknown" n={c.stage_unknown ?? 0} exp="Signed documents whose signing stage couldn't be read." on={list.lanes.includes("stage_unknown")} onClick={setList ? () => toggleLane("stage_unknown") : undefined} />
+        <Kpi cap="Status unknown" n={c.status_unknown ?? 0} exp="Not a signed document, and no Draft / Final / Issued status found." on={list.lanes.includes("status_unknown")} onClick={setList ? () => toggleLane("status_unknown") : undefined} />
         <Kpi cap="Executed, low confidence" n={c.low_confidence_executed ?? 0} exp="Marked fully executed, but the scan isn't sure." on={list.lanes.includes("low_confidence_executed")} onClick={setList ? () => toggleLane("low_confidence_executed") : undefined} />
         <Kpi cap="No kind" n={c.no_kind ?? 0} exp="The catalog couldn't tell what the document is." on={list.lanes.includes("no_kind")} onClick={setList ? () => toggleLane("no_kind") : undefined} />
         <Kpi cap="Reviewed today" n={c.reviewed_today ?? 0} exp="Confirmed or marked wrong since midnight." />
@@ -372,7 +391,7 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
           <SidePanel row={cur} onClose={() => setCur(null)}>
             <form className="review-form" onSubmit={(e) => { e.preventDefault(); onConfirm(); }}>
               <p className="why small"><b>Why:</b> {why(cur)}</p>
-              <fieldset>
+              {isExecutable(cur) ? <fieldset>
                 <legend>Execution label</legend>
                 <label>Stage
                   <select value={form.stage} onChange={(e) => setForm({ ...form, stage: e.target.value, executed_date: e.target.value === "fully_executed" ? form.executed_date : "" })}>
@@ -383,13 +402,22 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
                 <label>Executed date
                   <input type="date" value={form.executed_date} disabled={form.stage !== "fully_executed"} onChange={(e) => setForm({ ...form, executed_date: e.target.value })} />
                 </label>
-              </fieldset>
+              </fieldset> : <fieldset>
+                <legend>Status &amp; Execution label</legend>
+                <label>Status
+                  <select value={form.doc_status ?? ""} disabled={!statusPublished} onChange={(e) => setForm({ ...form, doc_status: e.target.value })}>
+                    <option value="">(leave unchanged)</option>
+                    {DOC_STATUSES.map((s) => <option key={s} value={s}>{display("status", s)}</option>)}
+                  </select>
+                </label>
+                {!statusPublished ? <p className="muted small">Status isn&apos;t on the Drive labels yet (it publishes with the Part 2 release), so it can&apos;t be set here. Confirm still records your review.</p> : null}
+              </fieldset>}
               <fieldset>
                 <legend>Catalog Review label</legend>
                 <label className="radio"><input type="radio" name="st" checked={form.status === "confirmed"} onChange={() => setForm({ ...form, status: "confirmed" })} /> Confirmed</label>
                 <label className="radio"><input type="radio" name="st" checked={form.status === "wrong"} onChange={() => setForm({ ...form, status: "wrong" })} /> Wrong - see note</label>
                 <label>Note<textarea value={form.note} maxLength={2000} rows={3} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
-                <p className="muted small">Reviewed by is set to you. No other label or file property is changed.</p>
+                <p className="muted small">Reviewed by is set to you. No other label or file property is changed; use Edit labels below for kind, entity and the rest.</p>
               </fieldset>
               <div className="actions">
                 <button className="btn primary" type="submit" disabled={busy}>Confirm and next</button>
@@ -398,6 +426,7 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
               {!data?.canWrite ? <p className="muted small">The first Confirm asks Google once for label-write access.</p> : null}
               {msg ? <p className={`status${msg.startsWith("Not saved") ? " error" : ""}`} role="status" aria-live="polite">{msg}</p> : null}
             </form>
+            {editSlot}
           </SidePanel>
         ) : null}
       </div>

@@ -3,7 +3,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseReviewSpec, reviewQuery } from "@/lib/reviewq";
 import { SpecError } from "@/lib/find";
-import { DEFAULT_LIST, ReviewView, type ReviewViewProps } from "@/components/ReviewClient";
+import { DEFAULT_LIST, ReviewView, isExecutable, type ReviewViewProps } from "@/components/ReviewClient";
+import type { Row } from "@/components/client";
+import { buildReviewMods, hasField, validateReview } from "@/lib/labels";
 
 describe("CAT-WO-02 item 2 · Review queue lists run in SQL", () => {
   it("no spec: CAT-WO-01's order and page size are unchanged", () => {
@@ -45,5 +47,50 @@ describe("Review page (Datum look)", () => {
     expect(out).toMatch(/aria-pressed="true"[^>]*>.{0,80}No kind|No kind[\s\S]{0,40}/);
     expect(out).toContain("Review queue");              // serif page title
     expect(out).toContain("None shown on this page · 19,089 files");   // Datum pager text (empty page)
+  });
+
+  // CAT-WO-02 item 6 / 8 on the Review screen
+  const row = (o: Partial<Row>): Row => ({
+    file_id: "AAAAAAAAAAAAAAAAAAAAA1", document_id: 1, name: "x", web_view_link: "", kind: "quarterly_report", entities: [], portcos: [],
+    fiscal_year: 2023, period: null, stage: null, executed_date: null, workstream: null, issuer: null, tier: "normal", review_status: null,
+    status: null, issued_date: null, issuing_entity: null, receiving_entities: [], signed_date: null, effective_date: null, is_primary: true,
+    modified_time: null, file_type_family: "pdf", queue_reason: "status_unknown", signals: null, confidence: null, stage_suggested: null,
+    changed: [], catalog: {}, requires_execution: false, ...o,
+  });
+  it("Status unknown card and lane come right after Stage unknown", () => {
+    const out = renderToStaticMarkup(createElement(ReviewView, { ...base, data: { ...base.data!, counts: { ...base.data!.counts, status_unknown: 26498 } }, list: DEFAULT_LIST, setList: () => {} }));
+    expect(out).toContain('class="k-cap">Status unknown<');
+    expect(out).toContain('class="k-num">26,498<');
+    expect(out.indexOf("Stage unknown")).toBeLessThan(out.indexOf("Status unknown"));
+    expect(out.indexOf("Status unknown")).toBeLessThan(out.indexOf("Executed, low confidence"));
+  });
+  it("the form shows Status for a non-executable kind (disabled until published) and Stage for an executable one", () => {
+    const st = renderToStaticMarkup(createElement(ReviewView, { ...base, cur: row({}), statusPublished: false, editSlot: createElement("div", { id: "edit-slot" }) }));
+    expect(st).toContain("Status &amp; Execution label");
+    expect(st).not.toContain(">Execution label<");
+    expect(st).toMatch(/<select[^>]*disabled/);
+    expect(st).toContain("publishes with the Part 2 release");
+    expect(st).toContain('id="edit-slot"');                       // item 8: Edit labels in the Review form
+    const ex = renderToStaticMarkup(createElement(ReviewView, { ...base, cur: row({ kind: "lpa", requires_execution: true, queue_reason: "stage_unknown" }) }));
+    expect(ex).toContain(">Execution label<");
+    expect(ex).not.toContain("Status &amp; Execution label");
+    expect(isExecutable(row({ requires_execution: null, queue_reason: "no_kind" }))).toBe(true);   // not known as non-executable: Stage, as before
+    expect(isExecutable(row({ requires_execution: null, queue_reason: "status_unknown" }))).toBe(false); // the lane decides: Status
+  });
+});
+
+describe("CAT-WO-02 item 6 · Review lanes and the Status write", () => {
+  it("status_unknown is a whitelisted lane, status a sortable column; the page query returns requires_execution and status", () => {
+    const q = reviewQuery(parseReviewSpec(JSON.stringify({ sort: { col: "status", dir: "asc" } }), "status_unknown"), [], 0);
+    expect(q.params).toContainEqual(["status_unknown"]);
+    expect(q.sql).toContain("ORDER BY status ASC NULLS LAST");
+    expect(q.sql).toMatch(/requires_execution, status\s+FROM app.v_review_queue/);
+  });
+  it("doc_status: refused while the Status field is unpublished, never together with a stage, unknown values refused", () => {
+    expect(validateReview({ status: "confirmed", doc_status: "final" })).toEqual({ ok: false, reason: hasField("exec", "status") ? "x" : "label_not_published:exec.status" });
+    expect(validateReview({ status: "confirmed", doc_status: "nonsense" })).toEqual({ ok: false, reason: "doc_status" });
+    expect(validateReview({ status: "confirmed" })).toMatchObject({ ok: true, value: { docStatus: null } });
+    const m = buildReviewMods({ status: "confirmed", stage: null, executedDate: null, note: null, docStatus: null, reviewerEmail: "a@b.c" });
+    expect(m.labels).toEqual(["review"]);                         // no Status, no Stage: only Catalog Review is written
   });
 });

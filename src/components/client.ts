@@ -42,6 +42,7 @@ export interface Row {
   modified_time: string | null;
   file_type_family: string | null;
   queue_reason: string | null;
+  requires_execution?: boolean | null;
   signals: string[] | null;
   confidence: string | null;
   stage_suggested: string | null;

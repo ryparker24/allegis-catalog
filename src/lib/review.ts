@@ -28,15 +28,16 @@ export async function reviewWrite(body: unknown, ctx: { session: Session; db: Db
   }
   try {
     await ctx.db.exec(
-      `INSERT INTO app.review_event (file_id, document_id, reviewer_email, status, stage, executed_date, note, queue_reason, labels_written)
-       VALUES ($1, $2, $3, $4, $5, $6::date, $7, $8, $9::text[])`,
-      [fileId, q[0].document_id, ctx.session.email.toLowerCase(), v.value.status, v.value.stage, v.value.executedDate, v.value.note, q[0].queue_reason, labels],
+      `INSERT INTO app.review_event (file_id, document_id, reviewer_email, status, stage, executed_date, note, queue_reason, labels_written, edits)
+       VALUES ($1, $2, $3, $4, $5, $6::date, $7, $8, $9::text[], $10::jsonb)`,
+      [fileId, q[0].document_id, ctx.session.email.toLowerCase(), v.value.status, v.value.stage, v.value.executedDate, v.value.note, q[0].queue_reason, labels,
+       v.value.docStatus ? JSON.stringify({ status: v.value.docStatus }) : null],
     );
   } catch {
     // Drive already holds the review; the queue will show the file again until the event lands. Say so plainly.
     logEvent("review_write", { outcome: "event_insert_failed", file_id: fileId, document_id: q[0].document_id, status: v.value.status });
     return { status: 500, body: { error: "event_insert_failed", drive_written: true } };
   }
-  logEvent("review_write", { outcome: "ok", file_id: fileId, document_id: q[0].document_id, status: v.value.status, stage: v.value.stage, queue_reason: q[0].queue_reason, labels });
+  logEvent("review_write", { outcome: "ok", file_id: fileId, document_id: q[0].document_id, status: v.value.status, stage: v.value.stage, doc_status: v.value.docStatus ?? null, queue_reason: q[0].queue_reason, labels });
   return { status: 200, body: { ok: true, labels } };
 }

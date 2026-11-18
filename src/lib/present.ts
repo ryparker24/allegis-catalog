@@ -34,6 +34,7 @@ export function present<T extends DbRow>(r: LiveRow<T>) {
     modified_time: d.modified_time ?? null,
     file_type_family: d.file_type_family ?? null,
     queue_reason: d.queue_reason ?? null,
+    requires_execution: (d.requires_execution as boolean | null | undefined) ?? null,   // Review form: Stage vs Status
     signals: d.signals ?? null,
     confidence: d.confidence ?? null,
     stage_suggested: d.stage_suggested ?? null,
