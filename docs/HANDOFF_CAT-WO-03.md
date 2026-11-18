@@ -2,11 +2,39 @@
 
 *2026-11-18. Codes, IDs and counts only: no LP, individual or file names. Rulings R-025 / R-026 and Ryan's rulings of 2026-11-17/18 (below).*
 
-**Status (draft, kept current):** built on git branch `cat-wo-03` against the throwaway Neon branch only. **Nothing on main, Drive, labels or Label manager.** CAT-WO-02 Part 2 was not fully released when this started (its re-sync was pending), so per Ryan every release step waits for `CATWO02 RELEASED`, then a rebase and a fresh throwaway branch from post-re-sync main.
+**Status (kept current):** release in progress. The database is on main; the label drafts are waiting for Ryan to publish in Label manager. See "Release log".
 
-- **Throwaway Neon branch:** `catwo03-throwaway` = `br-shiny-bar-bdbrp0e1` (endpoint `ep-jolly-flower-bd0esita`), taken from main at 2026-11-18 18:31 UTC (after Part 2's migration 004 + read-back, before its re-sync).
-- **Old prep branch** `br-gentle-silence-bd3vdeaf`: deleted after the prep was re-applied here (Ryan's instruction).
-- **Git:** `cat-wo-03` = the prep commit (`eda7a0e`) rebased onto main `3b18eb8` + this build.
+- **Throwaway Neon branches:**
+  - `catwo03-throwaway-2` = `br-hidden-bread-bdzgdudh`, from main after Part 2's re-sync (LSN 2/C52FE880). All counts were re-run there.
+  - `catwo03-throwaway` = `br-shiny-bar-bdbrp0e1` is the first build branch (from before the re-sync). Kept; delete on Ryan's OK.
+- **Restore point:** `pre-catwo03` = `br-gentle-cell-bdflc9ck`, taken from main at the same LSN, before any release write.
+- **Old prep branch** `br-gentle-silence-bd3vdeaf`: deleted (Ryan's instruction).
+- **Git:** `cat-wo-03` = the prep commit rebased onto main `426a174` (`CATWO02 RELEASED`), plus this build.
+
+## Release log (2026-11-18)
+1. Rebased onto `426a174` (main's new commits were Part 2 handoff docs only). Tests: pipeline 35/35, sync 31/31, vitest 110/110, `tsc` clean.
+2. New throwaway branch from post-re-sync main, re-run end to end. The counts are identical to the first branch: 3,163 requirements, the same mix, Match subject 1,478 before the defaults. DB guards 13/13.
+3. Defaults applied (see "Defaults taken"), then re-run: the mix is unchanged, Match subject is 1,229, and guards are 13/13.
+4. Restore branch `pre-catwo03`.
+5. **Main** (`--release`, DB owner): `005_wo03.sql` → roster (414/414 mapped) → `005b` → applicability (60) → `apply_derive_wo02` (K1-R2: 841 → unknown) → subject → requirements (3,163 rows, same mix as the branch).
+   - Every `app` view keeps `security_barrier`.
+   - `catalog_app` cannot read `ref.party`, `ref.party_alias`, `ops.requirement*` or `cat.doc_party`. It can INSERT `app.requirement_override` / `app.review_event`, but cannot read, update or delete them.
+6. **Labels:** `--create-drafts --release` made unpublished deltas only:
+   - Allegis Document: 11 Entity choices.
+   - Parties: 24 changes (entity choices, Subject code(s), Subject (person)).
+   - Handling: Contains + Personnel info.
+   - Permissions: Ryan only.
+7. **Nightly hook** in `C:\DriveCatalog\drive_crawl.py` (outside the repo; backup kept in the session scratchpad): `wo03_checklists()` runs roster → subject (no staff) → requirements.
+   - It runs after the read-back in `incremental`, after a `full` crawl, and after `derive`.
+   - Tested on the throwaway branch: idempotent (0 documents changed on a second run, same 3,163 rows).
+   - The nightly loads the pipeline from `CATALOG_APP_DIR` = `C:\DriveCatalog\app-main`. That checkout moves to the release commit at deploy.
+8. **Screenshots** (local Worker on the throwaway branch, `?mask=1`; 0 preview frames and every file name masked before each shot; partner names hidden). Seven are kept outside the repo in `C:\DriveCatalog\proofs\catwo03\`:
+   - Checklists (LP subscription agreements);
+   - Gaps (AUDITED-FS);
+   - a Met row with its side panel and 8 candidates;
+   - Review with the Match subject lane (1,229);
+   - the Subject form (candidate code, "none", roster picker, staff search).
+   - Afterwards the Worker and proxy were stopped, `.dev.vars` and the dev secret were deleted, and the ports were confirmed free.
 
 ---
 
@@ -155,11 +183,34 @@ design check: OK
   2. **Ryan publishes in Label manager.**
   3. `--read-published --release` writes the IDs into `labels_schema.json`. The script never publishes.
 
-## Questions for Ryan
-1. **K-1 Met needs Status = Issued** (as ruled). Today almost no K-1 carries Issued; Part 2's markers give mostly Final. Accept Final for K-1s (rule v2), or keep Issued and mark them in review?
-2. **K1-R2 (Part 2)**: the crowded GP-received K-1s (254 documents) — a look at the rule? See item 3.
-3. **Directory consent for the pipeline**: run the staff step once with a `directory.readonly` token, or leave staff subjects to the app?
-4. **Checklist views in the rail** (deviation above): wanted now or later?
+## Defaults taken (for Ryan's review)
+Ryan (2026-11-18): "take your own recommendation on each … apply it, and list it here".
+1. **K-1 Met = Final or Issued.** Applied as `K1-SET` **v2** in `005b_wo03_seed.sql` (v1, Issued only, kept for history).
+   - No K-1 in the catalog carries Issued. Part 2's markers give Final 1,949 · Draft 251 · In review 16 · none 11,292.
+   - Draft and In review stay "on file".
+   - Today's mix is unchanged: all 61 FY2025 K-1s on file have no status yet.
+   - To revert: insert a v3 with `{"status": ["issued"]}`.
+2. **K1-R2 narrowed (Part 2 rule).** A GP with **more than 3** "received" K-1s in one fiscal year is crowded; those K-1s go back to unknown issuing/receiving instead of "received by the GP".
+   - A GP receives one or a few K-1s a year from its fund. The crowded ones are K-1s the GP issued to its members, or mixed folders.
+   - Applied in `pipeline/apply_derive_wo02.py` as a post-pass; the threshold is `derive_wo02.K1R2_MAX = 3`.
+   - On main: **841** documents → unknown, **51** keep K1-R2.
+   - The re-sync dry run shows the matching Parties Issuing / Receiving unsets on the labelled ones. None of these values was person-confirmed (0 of 1,209).
+   - Knock-on effects: those K-1s now match subjects on the member's name in the file name, so K-1 high matches rise from 1,505 to 1,610. The Match subject lane falls from 1,478 to **1,229**.
+3. **Directory consent: staff matching stays out of the nightly run** (it reports "staff directory not available (skipped)" and keeps the last values).
+   - A one-off run needs Ryan's consent, using `scripts/directory_token_wo03.py`. The steps are below, under "Directory consent".
+   - The app's Subject (person) picker asks for the scope on first use.
+4. **Checklist views in the rail: later.** Views stay remembered per user (last state). Saving them into the rail's view tree is a small follow-up.
+
+Kept as built (Ryan): partner names next to codes on Checklists rows (only Ryan is on the allowlist).
+
+### Directory consent (one-off staff step), when wanted
+1. In Google Cloud console, for the project of the crawl's OAuth client (`C:\DriveCatalog\client_secret.json`):
+   - **APIs & Services → Library → "People API" → Enable**, if it is not already on.
+   - **OAuth consent screen → Data access → Add scope** `.../auth/directory.readonly`. The app is Internal, so no Google verification is needed.
+2. From `C:\DriveCatalog`, run `py app\scripts\directory_token_wo03.py`. Sign in as ryan@allegiscapital.com and allow "See your organization's directory".
+   - The token goes to `%TEMP%\catwo03_directory_token.json`, outside the repo.
+3. Within the hour: `py app\pipeline\subject_wo03.py --db-url-file <main url file> --release --directory-token %TEMP%\catwo03_directory_token.json --apply`, then `del %TEMP%\catwo03_directory_token.json`.
+   - The next re-sync writes Subject (person) to the labels once that field is published.
 
 ## Release steps (after `CATWO02 RELEASED`; on Ryan's go-ahead; stop before the re-sync dry run is applied)
 0. Fix the coder + CISO findings (below).
