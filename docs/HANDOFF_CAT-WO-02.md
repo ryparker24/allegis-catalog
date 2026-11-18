@@ -522,7 +522,7 @@ Measured with `scripts/measure_wo02_item9d.py`, run after 004 + `derive` and bef
 - Review counts: open 40,163; no kind 12,347 (= files without a kind in `v_find`, of 46,259); status unknown 27,172; low-confidence executed 327; stage unknown 317; reviewed 0.
 - `check_main_readonly.py`: 26/26.
 
-**For Review:** the 3 NL-II legal-name conflicts: `1F0m7YSai1tK9c6UpISVVXtK5nSgCxEap`, `1qdkUyOzksns8Jffw7SZjYpEy47_lQ_vq` (labelled; Entity held through `C:\DriveCatalogesync_hold_entities.txt`) and `1sDS3RTq8nqqj-0VGK2czjfbKb5F8V4DI`.
+**For Review:** the 3 NL-II legal-name conflicts: `1F0m7YSai1tK9c6UpISVVXtK5nSgCxEap`, `1qdkUyOzksns8Jffw7SZjYpEy47_lQ_vq` (labelled; Entity held through `C:\DriveCatalog\resync_hold_entities.txt`) and `1sDS3RTq8nqqj-0VGK2czjfbKb5F8V4DI`.
 
 **Follow-ups:**
 - The Review side panel scrolls sideways.
