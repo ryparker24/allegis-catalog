@@ -95,6 +95,11 @@ def main():
     if mode == "--check" or problems:
         print(f"Kind: + {len(NEW_KIND_CHOICES)} choices at publish ({', '.join(NEW_KIND_CHOICES)}); "
               f"Entity: disable {', '.join(DISABLE_ENTITY_CHOICES)} (disable, not delete)")
+        try:
+            probs = _perm_problems(svc, by_title)
+            print("permissions: " + ("Ryan only on Allegis Document, and every existing WO-02 label matches it" if not probs else "PROBLEMS: " + "; ".join(probs)))
+        except Exception as e:                      # read-only report; never blocks --check
+            print(f"permissions: could not read ({type(e).__name__})")
         print("--check: nothing created, nothing published."); return
     if "--release" not in sys.argv:
         raise SystemExit("--create-drafts / --publish are CAT-WO-02 Part 2 release steps: add --release, and run them only "
@@ -126,7 +131,7 @@ def _field(lab, display):
 # Ryan: permission and visibility "Ryan only", same as the existing four labels. Every label this step touches must
 # have exactly the same permission set as Allegis Document, and that set may name nobody but Ryan.
 OWNER = "ryan@allegiscapital.com"
-WO02_LABELS = ("Allegis Document", "Parties", NEW_EXEC_TITLE)
+WO02_LABELS = ("Allegis Document", "Parties", NEW_EXEC_TITLE, "Execution")   # "Execution" = its title before the rename
 
 
 def _perms(svc, lab):
