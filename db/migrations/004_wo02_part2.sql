@@ -213,19 +213,31 @@ SELECT CASE r.applies_to WHEN 'name' THEN 'ENT-020' ELSE 'ENT-020P' END, 1, r.fi
 FROM ops.decomposition_rule r WHERE r.rule_id IN ('ENT-002', 'ENT-002P') AND r.version = 1
 ON CONFLICT (rule_id, version) DO NOTHING;
 
--- (Ryan, round 4) Schwab joins the catalog's bank / financial-institution list (ISS-004 name, ISS-004P folder;
---     issuer = bank). NK03 reads ISS-004P's names, so the Schwab statement folders become bank-statement folders.
-INSERT INTO ops.decomposition_rule (rule_id, version, field, applies_to, pattern, value, priority, active, notes, multi, provisional)
-SELECT rule_id, 2, field, applies_to, replace(pattern, '|US Bank)', '|US Bank|Schwab)'), value, priority, true,
-       'CAT-WO-02: + Schwab (Ryan)', multi, provisional
-FROM ops.decomposition_rule WHERE rule_id IN ('ISS-004', 'ISS-004P') AND version = 1 AND pattern LIKE '%|US Bank)%'
-ON CONFLICT (rule_id, version) DO NOTHING;
+-- (Ryan, round 5) legal-name entity rules from the Datum roster's company_name (approved: ASOF, CSOP, NL-I, NL-II, X,
+--     MTV-VI; CIP-I and every GP rule held). Legal name without its L.P. / LLC suffix, whole words, never followed by
+--     another fund number (II, III, 2 ...); a year (2019) is allowed. ENT-0nn = file name, ENT-0nnP = any folder name.
+--     Same priority / multi as ENT-002. Patterns are valid in Python re and Postgres ARE (checked on the branch).
 DO $$
 BEGIN
-    IF (SELECT count(*) FROM ops.decomposition_rule WHERE rule_id IN ('ISS-004', 'ISS-004P') AND version = 2 AND pattern LIKE '%Schwab%') <> 2 THEN
-        RAISE EXCEPTION 'ISS-004 / ISS-004P v2 with Schwab not in place: check the v1 patterns';
+    IF EXISTS (SELECT 1 FROM ops.decomposition_rule WHERE rule_id IN ('ENT-021', 'ENT-021P', 'ENT-022', 'ENT-022P', 'ENT-023', 'ENT-023P', 'ENT-024', 'ENT-024P', 'ENT-025', 'ENT-025P', 'ENT-026', 'ENT-026P')
+               AND (rule_id, value) NOT IN (('ENT-021', 'ASOF'), ('ENT-021P', 'ASOF'), ('ENT-022', 'CSOP'), ('ENT-022P', 'CSOP'), ('ENT-023', 'NL-I'), ('ENT-023P', 'NL-I'), ('ENT-024', 'NL-II'), ('ENT-024P', 'NL-II'), ('ENT-025', 'X'), ('ENT-025P', 'X'), ('ENT-026', 'MTV-VI'), ('ENT-026P', 'MTV-VI'))) THEN
+        RAISE EXCEPTION 'ENT-021..026 already used by different rules: pick free rule ids';
     END IF;
 END $$;
+INSERT INTO ops.decomposition_rule (rule_id, version, field, applies_to, pattern, value, priority, active, notes, multi, provisional) VALUES
+ ('ENT-021', 1, 'entity', 'name', $re$(?i)(?<![A-Za-z0-9])Allegis[^A-Za-z0-9]*Special[^A-Za-z0-9]*Opportunities[^A-Za-z0-9]*Fund(?![A-Za-z0-9])(?![^A-Za-z0-9]*(i{1,3}|iv|vi{0,3}|ix|x|[0-9])(?![A-Za-z0-9]))$re$, 'ASOF', 30, true, 'CAT-WO-02: legal name (Datum roster), Ryan round 5', true, false),
+ ('ENT-021P', 1, 'entity', 'path_segment', $re$(?i)(?<![A-Za-z0-9])Allegis[^A-Za-z0-9]*Special[^A-Za-z0-9]*Opportunities[^A-Za-z0-9]*Fund(?![A-Za-z0-9])(?![^A-Za-z0-9]*(i{1,3}|iv|vi{0,3}|ix|x|[0-9])(?![A-Za-z0-9]))$re$, 'ASOF', 30, true, 'CAT-WO-02: legal name (Datum roster), Ryan round 5', true, false),
+ ('ENT-022', 1, 'entity', 'name', $re$(?i)(?<![A-Za-z0-9])Cyber[^A-Za-z0-9]*Special[^A-Za-z0-9]*Opportunity[^A-Za-z0-9]*Partners(?![A-Za-z0-9])(?![^A-Za-z0-9]*(i{1,3}|iv|vi{0,3}|ix|x|[0-9])(?![A-Za-z0-9]))$re$, 'CSOP', 30, true, 'CAT-WO-02: legal name (Datum roster), Ryan round 5', true, false),
+ ('ENT-022P', 1, 'entity', 'path_segment', $re$(?i)(?<![A-Za-z0-9])Cyber[^A-Za-z0-9]*Special[^A-Za-z0-9]*Opportunity[^A-Za-z0-9]*Partners(?![A-Za-z0-9])(?![^A-Za-z0-9]*(i{1,3}|iv|vi{0,3}|ix|x|[0-9])(?![A-Za-z0-9]))$re$, 'CSOP', 30, true, 'CAT-WO-02: legal name (Datum roster), Ryan round 5', true, false),
+ ('ENT-023', 1, 'entity', 'name', $re$(?i)(?<![A-Za-z0-9])Allegis[^A-Za-z0-9]*NL[^A-Za-z0-9]*Capital(?![A-Za-z0-9])(?![^A-Za-z0-9]*(i{1,3}|iv|vi{0,3}|ix|x|[0-9])(?![A-Za-z0-9]))$re$, 'NL-I', 30, true, 'CAT-WO-02: legal name (Datum roster), Ryan round 5', true, false),
+ ('ENT-023P', 1, 'entity', 'path_segment', $re$(?i)(?<![A-Za-z0-9])Allegis[^A-Za-z0-9]*NL[^A-Za-z0-9]*Capital(?![A-Za-z0-9])(?![^A-Za-z0-9]*(i{1,3}|iv|vi{0,3}|ix|x|[0-9])(?![A-Za-z0-9]))$re$, 'NL-I', 30, true, 'CAT-WO-02: legal name (Datum roster), Ryan round 5', true, false),
+ ('ENT-024', 1, 'entity', 'name', $re$(?i)(?<![A-Za-z0-9])AllegisNL[^A-Za-z0-9]*Capital[^A-Za-z0-9]*II(?![A-Za-z0-9])(?![^A-Za-z0-9]*(i{1,3}|iv|vi{0,3}|ix|x|[0-9])(?![A-Za-z0-9]))$re$, 'NL-II', 30, true, 'CAT-WO-02: legal name (Datum roster), Ryan round 5', true, false),
+ ('ENT-024P', 1, 'entity', 'path_segment', $re$(?i)(?<![A-Za-z0-9])AllegisNL[^A-Za-z0-9]*Capital[^A-Za-z0-9]*II(?![A-Za-z0-9])(?![^A-Za-z0-9]*(i{1,3}|iv|vi{0,3}|ix|x|[0-9])(?![A-Za-z0-9]))$re$, 'NL-II', 30, true, 'CAT-WO-02: legal name (Datum roster), Ryan round 5', true, false),
+ ('ENT-025', 1, 'entity', 'name', $re$(?i)(?<![A-Za-z0-9])Allegis[^A-Za-z0-9]*Capital[^A-Za-z0-9]*X(?![A-Za-z0-9])(?![^A-Za-z0-9]*(i{1,3}|iv|vi{0,3}|ix|x|[0-9])(?![A-Za-z0-9]))$re$, 'X', 30, true, 'CAT-WO-02: legal name (Datum roster), Ryan round 5', true, false),
+ ('ENT-025P', 1, 'entity', 'path_segment', $re$(?i)(?<![A-Za-z0-9])Allegis[^A-Za-z0-9]*Capital[^A-Za-z0-9]*X(?![A-Za-z0-9])(?![^A-Za-z0-9]*(i{1,3}|iv|vi{0,3}|ix|x|[0-9])(?![A-Za-z0-9]))$re$, 'X', 30, true, 'CAT-WO-02: legal name (Datum roster), Ryan round 5', true, false),
+ ('ENT-026', 1, 'entity', 'name', $re$(?i)(?<![A-Za-z0-9])Allegis[^A-Za-z0-9]*MTV[^A-Za-z0-9]*VI(?![A-Za-z0-9])(?![^A-Za-z0-9]*(i{1,3}|iv|vi{0,3}|ix|x|[0-9])(?![A-Za-z0-9]))$re$, 'MTV-VI', 30, true, 'CAT-WO-02: legal name (Datum roster), Ryan round 5', true, false),
+ ('ENT-026P', 1, 'entity', 'path_segment', $re$(?i)(?<![A-Za-z0-9])Allegis[^A-Za-z0-9]*MTV[^A-Za-z0-9]*VI(?![A-Za-z0-9])(?![^A-Za-z0-9]*(i{1,3}|iv|vi{0,3}|ix|x|[0-9])(?![A-Za-z0-9]))$re$, 'MTV-VI', 30, true, 'CAT-WO-02: legal name (Datum roster), Ryan round 5', true, false)
+ON CONFLICT (rule_id, version) DO NOTHING;
 COMMIT;
 
 -- ---------------------------------------------------------------- item 6 / item 8 · Review queue (after the CAT-WO-01.1 rebase)

@@ -158,7 +158,16 @@ NK_FAMILIES = {"K1F": frozenset({"pdf", "image", "doc"}), "NK02": frozenset({"pd
 NK_NOT_FAMILIES = {"K1N": frozenset({"archive"}), "NK05": frozenset({"archive"})}
 # NK03 · bank-statement folders only (Ryan). A bank 'the catalog knows' = the bank-issuer rule's names (ISS-004P),
 # loaded by the caller with set_bank_pattern(); without it only 'bank' / 'account statement' folders count.
-NK03_BANK = W(r"(‹bank|‹account statements?›)")
+NK03_BANK = W(r"(‹bank|‹account statements?›|‹schwab›)")   # Schwab: Ryan round 4 (in the bank list for NK03)
+# Ryan round 5: issuer = bank from Schwab ONLY for PDFs under a Schwab folder (sheets / Word / other keep their issuer)
+SCHWAB_FOLDER = W(r"‹schwab›")
+
+
+def schwab_issuer(segs, family, issuer):
+    """'bank' when a PDF sits under a Schwab folder and has no issuer yet; else None (nothing to change)."""
+    if family == "pdf" and issuer is None and any(SCHWAB_FOLDER.search(s) for s in segs):
+        return "bank"
+    return None
 NK03_EXCLUDE = W(r"(‹financial statements?›|‹capital statements?›|‹(partner|partners'?|capital) account statements?›|"
                  r"‹k-?1'?s?›(?![0-9])|‹k1s›)")
 _bank_names = None

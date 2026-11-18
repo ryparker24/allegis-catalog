@@ -41,17 +41,20 @@ with psycopg.connect(open(a.db_url_file).read().strip()) as conn, conn.cursor() 
     new_kind = {}
     cur.execute("""SELECT fd.document_id, f.name, f.path_segments, f.file_type_family, d.kind_auto,
                           coalesce(d.execution_stage_confirmed, d.execution_stage_auto),
-                          coalesce(d.issuer_confirmed, d.issuer_auto)
+                          coalesce(d.issuer_confirmed, d.issuer_auto), d.kind_confirmed IS NOT NULL
                    FROM cat.file f JOIN cat.file_document fd ON fd.file_id = f.file_id
                    JOIN cat.document d ON d.document_id = fd.document_id
                    WHERE f.removed_run IS NULL AND f.trashed IS NOT TRUE AND f.is_shortcut IS NOT TRUE
                      AND f.noise_flag IS NOT TRUE AND coalesce(f.handling, 'secret') <> 'secret'
-                     AND d.kind_confirmed IS NULL
                    ORDER BY fd.document_id, (fd.file_role = 'primary') DESC""")
     seen_doc = set()
-    for doc, name, segs, fam, kind, stage, issuer in cur.fetchall():
+    issuers = []                                             # Ryan round 5: Schwab -> bank, PDFs only
+    for doc, name, segs, fam, kind, stage, issuer, person_kind in cur.fetchall():
         if doc in seen_doc: continue                         # one result per document: the primary copy decides
         seen_doc.add(doc)
+        if dw.schwab_issuer((segs or [])[1:], fam, issuer):
+            issuers.append(("bank", doc)); c["issuer:schwab-pdf->bank"] += 1
+        if person_kind: continue                             # a person's kind is never touched
         rid, k = dw.rekind_rule(name, kind, stage, issuer)
         if not k and kind is None and ruled:
             rid, k = dw.nokind_rule(name, (segs or [])[1:], only=ruled, family=fam)
@@ -90,6 +93,8 @@ with psycopg.connect(open(a.db_url_file).read().strip()) as conn, conn.cursor() 
     cur.executemany("""UPDATE cat.document SET status_auto=%s, status_rule=%s, updated_at=now()
                        WHERE document_id=%s AND (status_auto, status_rule) IS DISTINCT FROM (%s, %s)""",
                     [(st, ru, d, st, ru) for st, ru, d in status])
+    if issuers:  # issuer_auto only where nothing (machine or person) set an issuer
+        cur.executemany("UPDATE cat.document SET issuer_auto=%s, updated_at=now() WHERE document_id=%s AND issuer_auto IS NULL AND issuer_confirmed IS NULL", issuers)
     if kinds:   # kind_auto only, never over a person's kind; a later derive (build_documents) recomputes kind_auto,
                 # so this script runs after every `drive_crawl.py derive`
         cur.executemany("""UPDATE cat.document SET kind_auto=%s, updated_at=now()

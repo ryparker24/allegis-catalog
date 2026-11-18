@@ -133,6 +133,12 @@ check("G-D13 RK1 before NK07: a quarter -> quarterly_report, else financial_stat
       dw.nokind_rule("Fin Report Q3", ["reports"], only=R, family="pdf") == ("RK1Q", "quarterly_report")
       and dw.nokind_rule("Financial Report 2023", ["reports"], only=R, family="pdf") == ("RK1F", "financial_statements")
       and dw.nokind_rule("Wire 12", [], only=R) == (None, None) and dw.nokind_rule("tb", ["pbc"], only=R) == (None, None))
+check("G-D15 Schwab -> issuer bank only for a PDF under a Schwab folder with no issuer yet; NK03 counts Schwab folders",
+      dw.schwab_issuer(["mgmt co", "schwab statements"], "pdf", None) == "bank"
+      and dw.schwab_issuer(["mgmt co", "schwab statements"], "sheet", None) is None
+      and dw.schwab_issuer(["mgmt co", "schwab statements"], "pdf", "auditor") is None
+      and dw.schwab_issuer(["mgmt co", "statements"], "pdf", None) is None
+      and dw.nokind_rule("Statement 2023-01", ["mgmt co", "schwab statements"], only=R, family="pdf") == ("NK03", "bank_stmt"))
 check("G-D14 RK2-RK4 re-kinds: operating agreement (amendment), template unless executed, formation filing; correspondence kept",
       dw.rekind_rule("Operating Agreement", "lpa") == ("RK2", "operating_agreement")
       and dw.rekind_rule("Amended and Restated Operating Agreement", "lpa") == ("RK2", "operating_agreement_amendment")
