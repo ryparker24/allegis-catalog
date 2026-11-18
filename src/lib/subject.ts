@@ -27,6 +27,7 @@ export function validateSubject(o: Record<string, unknown>): { ok: true; value: 
     const c = o.codes.map((x) => String(x).trim().toUpperCase());
     if (!c.every((x) => SUBJECT_CODE_RE.test(x))) return { ok: false, reason: "codes_must_be_roster_codes" };   // never a typed name
     codes = [...new Set(c)].sort();
+    if (!codes.length && !none) return { ok: false, reason: "empty_codes_need_none" };   // "none" must be said explicitly (coder review)
   }
   if (none) {
     if (codes && codes.length) return { ok: false, reason: "none_with_codes" };

@@ -12,11 +12,15 @@ ap.add_argument("--roster", default=r"C:\DriveCatalog\datum_exports\datum_partne
 _a = ap.parse_args()
 
 
+sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__import__("os").path.abspath(__file__)), "..", "pipeline"))
+import dbguard_wo03 as _dbg
+
+
 def branch():
     url = next(l.strip().partition("=")[2].strip().strip("'\"") if not l.strip().startswith("postgres") else l.strip()
                for l in open(_a.owner_url_file, encoding="utf-8-sig") if "postgres" in l)
     m = re.search(r"@(ep-[a-z0-9-]+?)(-pooler)?\.", url)
-    if not m or m.group(1) == _a.endpoint:
+    if not m or m.group(1) == _a.endpoint or _a.endpoint == _dbg.main_endpoint():   # CISO review: never main
         sys.exit("REFUSED: --endpoint must be a branch endpoint, not main")
     return psycopg.connect(url[: m.start(1)] + _a.endpoint + url[(m.end(2) if m.group(2) else m.end(1)):], autocommit=True)
 

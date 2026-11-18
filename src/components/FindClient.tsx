@@ -660,7 +660,11 @@ export function FindClient() {
               setRes((r) => (r ? { ...r, rows: r.rows.map((x) => (x.file_id === upd.file_id ? upd : x)) } : r));
             }} />
             {/* CAT-WO-03 R-026: set or correct the document's Subject (roster codes / a staff account) */}
-            <SubjectForm row={open} onSaved={() => run(spec)} />
+            <SubjectForm row={open} onSaved={(patch) => {
+              const upd = { ...open, ...patch } as Row;          // the panel shows the saved subject at once (coder review)
+              setOpen(upd);
+              setRes((r) => (r ? { ...r, rows: r.rows.map((x) => (x.file_id === upd.file_id ? upd : x)) } : r));
+            }} />
           </SidePanel>
         ) : null}
         {bulk ? <BulkEditDialog field={bulk} ids={[...checked]} onClose={() => setBulk(null)} onDone={() => run(spec)} /> : null}

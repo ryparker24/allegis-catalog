@@ -12,7 +12,7 @@ type Staff = { email: string; name: string };
  * directory; that search is the ONLY place the app asks Google for directory access (on first use).
  * lane = the Review "Match subject" lane (candidates first, plus "none").
  */
-export function SubjectForm({ row, lane = false, onSaved }: { row: Row; lane?: boolean; onSaved: () => void }) {
+export function SubjectForm({ row, lane = false, onSaved }: { row: Row; lane?: boolean; onSaved: (patch: Partial<Row>) => void }) {
   const ents = [...new Set([...(row.entities ?? []), ...(row.issuing_entity ? [row.issuing_entity] : [])])];
   const [parties, setParties] = useState<Party[] | null>(null);
   const [codes, setCodes] = useState<string[]>(row.subject_codes ?? []);
@@ -25,9 +25,9 @@ export function SubjectForm({ row, lane = false, onSaved }: { row: Row; lane?: b
   useEffect(() => {
     setCodes(row.subject_codes ?? []); setNone(false); setPerson(undefined); setStaff(null); setMsg(null);
     if (!ents.length) { setParties([]); return; }
-    api<{ parties: Party[] }>(`/api/party?${ents.map((e) => `entity=${encodeURIComponent(e)}`).join("&")}`).then((r) => setParties(r.parties)).catch(() => setParties([]));
+    api<{ parties: Party[] }>(`/api/party?file_id=${encodeURIComponent(row.file_id)}`).then((r) => setParties(r.parties)).catch(() => setParties([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [row.file_id]);
+  }, [row.file_id, (row.subject_codes ?? []).join(","), row.subject_person]);
   const nameOf = (c: string) => (maskNames() ? "" : parties?.find((p) => p.partner_code === c)?.display_name ?? "");
   const roster = [...new Map((parties ?? []).map((p) => [p.partner_code, p])).values()];
   const searchStaff = async () => {
@@ -35,15 +35,16 @@ export function SubjectForm({ row, lane = false, onSaved }: { row: Row; lane?: b
     try { setStaff((await api<{ hits: Staff[] }>(`/api/subject/directory?q=${encodeURIComponent(personQ.trim())}&next=${lane ? "/review" : "/"}`)).hits); }
     catch (e) { setMsg((e as Error).message); }   // 409 consent_required: api() sends the user to Google once
   };
+  const codesChanged = JSON.stringify(codes) !== JSON.stringify([...(row.subject_codes ?? [])].sort());
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
       const r = await api<{ label_published: boolean }>("/api/subject", { method: "POST", body: JSON.stringify({
         file_id: row.file_id, source: lane ? "match_subject" : undefined,
-        ...(none ? { none: true } : { codes }), ...(person !== undefined ? { person } : {}),
+        ...(none ? { none: true } : codesChanged ? { codes } : {}), ...(person !== undefined ? { person } : {}),
       }) });
       setMsg(r.label_published ? "Saved to Drive." : "Recorded in the catalog (the Subject fields aren't published on the label yet).");
-      onSaved();
+      onSaved({ subject_codes: none ? [] : codesChanged ? codes : row.subject_codes, subject_person: person === undefined ? row.subject_person : person });
     } catch (e) {
       const b = (e as { body?: { error?: string; reason?: string } }).body;
       setMsg(`Not saved: ${b?.reason ?? b?.error ?? (e as Error).message}`);
@@ -85,7 +86,7 @@ export function SubjectForm({ row, lane = false, onSaved }: { row: Row; lane?: b
       )) : <span className="muted small">No staff found.</span>}</div> : null}
       {person === null ? <p className="muted small">Subject (person) will be cleared.</p> : null}
       <div className="actions">
-        <button className="btn primary" type="button" disabled={busy || (!none && !codes.length && person === undefined && JSON.stringify(codes) === JSON.stringify(row.subject_codes ?? []))} onClick={save}>Save subject</button>
+        <button className="btn primary" type="button" disabled={busy || (!none && !(codesChanged && codes.length) && person === undefined)} onClick={save}>Save subject</button>
       </div>
       {msg ? <p className={`status${msg.startsWith("Not saved") ? " error" : ""}`} role="status">{msg}</p> : null}
     </div>

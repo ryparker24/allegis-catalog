@@ -88,6 +88,10 @@ check("G-T4 personnel: Handling is RAISED to Restricted + Personnel info",
 check("G-T5 personnel: never lowers secret / restricted, never removes a Contains choice",
       cl.handling_raise({"_personnel": True}, {"tier": "secret", "contains": ["personnel"]}, fs) == {}
       and cl.handling_raise({"_personnel": True}, {"tier": "restricted", "contains": []}, fs) == {"contains": ["personnel"]})
+check("G-T5b personnel: an unknown / blank tier is raised; restricted keeps its tier; secret is never touched",
+      cl.handling_raise({"_personnel": True}, {"tier": None, "contains": None}, fs) == {"tier": "restricted", "contains": ["personnel"]}
+      and "tier" not in cl.handling_raise({"_personnel": True}, {"tier": "restricted", "contains": ["lp_pii"]}, fs)
+      and cl.handling_raise({"_personnel": True}, {"tier": "secret", "contains": []}, fs).get("tier") is None)
 check("G-T6 not personnel, or Personnel info not published: Handling untouched",
       cl.handling_raise({"_personnel": False}, {"tier": "normal"}, fs) == {}
       and cl.handling_raise({"_personnel": True}, {"tier": "normal"}, FakeSchema({"handling": {"label_id": "H", "fields": {"contains": {"field_id": "c", "choices": {"lp_pii": "l"}}}}})) == {})
@@ -128,6 +132,22 @@ check("G-R8 override Not required wins over a Met candidate", rq.evaluate([cand(
 ov = {"action": "link", "override_id": 8, "file_id": "fLINKED00001", "document_id": 9}
 res = rq.evaluate([cand(1, stage="draft")], SW, ov)
 check("G-R9 override Link: met with the linked file, source person", res[0] == "met" and res[2]["file_id"] == "fLINKED00001" and res[2]["source"] == "person")
+
+RULE_FS = {"rule_id": "AUDITED-FS", "subtype_code": "AUD-01", "subject_type": "entity_fy", "period_from": 2024,
+           "entity_filter": {"company_kind": ["fund", "spv"], "applicability": "required"}, "partner_filter": None}
+subs_fs = rq.subjects(RULE_FS, {("FUND-A", "AUD-01"): True, ("NOROSTER", "AUD-01"): True}, [{"entity": "FUND-A", "partner": "LP-0001", "ckind": "fund", "interest": "capital", "is_gp": False}],
+                      {"FUND-A": "fund", "NOROSTER": "fund", "MANCO": "manco"}, d)
+check("G-R10 audited FS covers a required fund with NO Datum roster (entity-level rules don't need a roster)",
+      sorted({s[0] for s in subs_fs}) == ["FUND-A", "NOROSTER"] and len(subs_fs) == 4)
+RULE_LP = {"rule_id": "LP-SUB", "subtype_code": "OFF-03", "subject_type": "entity_partner", "period_from": None,
+           "entity_filter": {"company_kind": ["fund", "spv"]}, "partner_filter": {"interest_kind": ["capital"], "is_company_gp": False}}
+dup = [{"entity": "FUND-A", "partner": "LP-0001", "ckind": "fund", "interest": "capital", "is_gp": False},
+       {"entity": "FUND-A", "partner": "LP-0001", "ckind": "spv", "interest": "capital", "is_gp": False}]
+check("G-R11 one requirement per key (two Datum relationships of one partner never abort the rebuild)",
+      rq.subjects(RULE_LP, {}, dup, {"FUND-A": "fund"}, d) == [("FUND-A", "LP-0001", None, None, None)])
+upd = ls2.confirm_updates(5, ["subject_codes"], {"subject_codes": []})
+check("G-T8 a person emptying Subject code(s) is stored as '{}' (none), never NULL (machine codes must not come back)",
+      upd and upd[0][1] == ([], 5) and "text[]" in upd[0][0])
 
 # ---------------------------------------------------------------- labels plan (offline)
 schema = json.load(open(ls3.SCHEMA_PATH, encoding="utf-8"))

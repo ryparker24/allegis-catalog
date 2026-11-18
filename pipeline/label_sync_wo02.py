@@ -80,7 +80,8 @@ def handling_mods(raise_, schema):
         return []
     H = schema.S["handling"]
     fm = []
-    if raise_.get("tier") == "restricted":
+    tier_ch = (H["fields"].get("tier") or {}).get("choices") or {}
+    if raise_.get("tier") == "restricted" and "restricted" in tier_ch:
         fm.append({"fieldId": H["fields"]["tier"]["field_id"], "setSelectionValues": [H["fields"]["tier"]["choices"]["restricted"]]})
     if raise_.get("contains"):
         fm.append({"fieldId": H["fields"]["contains"]["field_id"], "setSelectionValues": [H["fields"]["contains"]["choices"][c] for c in raise_["contains"]]})
@@ -114,6 +115,8 @@ def confirm_updates(doc_id, fields, live):
             continue   # month / as_of / n_a: no catalog column -> kept on the label only
         col = CONFIRM_COL.get(f)
         if col:
+            if f == "subject_codes":   # R-026: '{}' = a person's "none"; NULL would let the machine's codes come back (coder review)
+                out.append((f"UPDATE cat.document SET {col}=%s::text[], updated_at=now() WHERE document_id=%s", (list(v or []), doc_id))); continue
             out.append((f"UPDATE cat.document SET {col}=%s, updated_at=now() WHERE document_id=%s", (v if v not in ("", []) else None, doc_id)))
     return out
 

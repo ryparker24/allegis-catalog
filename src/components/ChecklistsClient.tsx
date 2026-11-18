@@ -132,6 +132,7 @@ export function ChecklistsClient() {
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
   };
   const lastPage = data ? Math.max(0, Math.ceil(data.matched / st.pageSize) - 1) : 0;
+  useEffect(() => { if (data && page > lastPage) setPage(lastPage); }, [data, page, lastPage]);   // e.g. the last row of the last page was linked
   const checklist = rule?.checklist ?? (FUND_LEVEL.has(st.rule) ? "fund_level" : "lp_subscriptions");
 
   return (
@@ -308,7 +309,7 @@ function RowPanel({ r, rule, onClose, onChanged }: { r: Req; rule?: Rule; onClos
           <button className="btn small" disabled={busy} onClick={() => post({ action: "link", file_id: h.file_id })}>This is the one</button></li>))}</ul>
         : <p className="muted small">Nothing found.</p>) : null}
       <h3 className="cap">Not required</h3>
-      <textarea className="input" rows={2} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Reason (required)" />
+      <textarea className="input" rows={2} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Reason (required). Use partner codes, never names." />
       <div className="actions">
         <button className="btn" disabled={busy || !note.trim()} onClick={() => post({ action: "not_required", note })}>Mark not required</button>
         {r.override_action ? <button className="btn" disabled={busy} onClick={() => post({ action: "clear" })}>Clear override</button> : null}

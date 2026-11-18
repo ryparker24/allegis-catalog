@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dbguard_wo03 as dbg
 
 PARTIES_MAX = 3
+STAFF_EMAIL = re.compile(r"^[a-z0-9._%+-]{1,64}@allegiscapital\.com$")
 CODE_RE = re.compile(r"^(LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?$")
 ROSTER_KINDS = ("subscription_agreement", "side_letter", "k1", "capital_statement")
 GP_AGREEMENT_KINDS = ("legal_agreement", "operating_agreement", "operating_agreement_amendment")   # GOV-04 / GOV-05, GP entities only
@@ -117,7 +118,7 @@ class RosterIndex:
 
     def partners(self, entities):
         out = {}
-        for e in entities:
+        for e in sorted(entities):          # deterministic: a partner on two rosters gets the same entity every run
             for p in self.by_entity.get(e, ()):
                 out.setdefault(p, e)
         return out
@@ -175,6 +176,7 @@ SELECT d.document_id, coalesce(d.kind_confirmed, d.kind_auto) AS kind, coalesce(
        EXISTS (SELECT 1 FROM cat.file_document fl JOIN app.labelled_file l ON l.file_id = fl.file_id WHERE fl.document_id = d.document_id) AS labelled
 FROM cat.document d
 WHERE coalesce(d.kind_confirmed, d.kind_auto) = ANY(%s) OR d.document_id = ANY(%s)
+   OR d.subject_codes_auto IS NOT NULL OR d.subject_person_auto IS NOT NULL OR d.personnel_auto   -- stale values get cleared (coder review)
 """
 FILES_SQL = """
 SELECT fd.document_id, f.file_id, f.name, f.path_segments
@@ -182,10 +184,12 @@ FROM cat.file_document fd JOIN cat.file f ON f.file_id = fd.file_id
 WHERE fd.document_id = ANY(%s) AND f.removed_run IS NULL AND f.trashed IS NOT TRUE AND coalesce(f.handling, 'secret') <> 'secret'
 """
 ENT_SQL = "SELECT fd.document_id, e.entity_code FROM cat.file_document fd JOIN cat.v_file_entity e ON e.file_id = fd.file_id WHERE fd.document_id = ANY(%s)"
+# the latest app decision per document and field (Match subject lane / Find side panel), with its time
 EVENTS_SQL = """
-SELECT DISTINCT ON (document_id) document_id, edits -> 'subject_codes' AS codes
-FROM app.review_event WHERE document_id IS NOT NULL AND edits ? 'subject_codes' ORDER BY document_id, event_id DESC
+SELECT DISTINCT ON (document_id) document_id, edits -> %s AS v, created_at
+FROM app.review_event WHERE document_id IS NOT NULL AND edits ? %s ORDER BY document_id, event_id DESC
 """
+LAST_READBACK_SQL = "SELECT max(finished_at) FROM ops.label_sync_run WHERE mode = 'readback' AND applied AND finished_at IS NOT NULL"
 
 
 def fund_gp_entities(cur):
@@ -211,8 +215,14 @@ def run(conn, apply=False, staff=None, log=print):
     cur.execute("SELECT partner_code, alias FROM ref.party_alias")
     idx = RosterIndex(party, cur.fetchall())
     gp_entities = {r[0] for r in cur.execute("SELECT entity_code FROM ref.entity WHERE entity_type = 'gp'")}
-    events = {r[0]: r[1] for r in cur.execute(EVENTS_SQL)}
-    cur.execute(DOCS_SQL, (list(ROSTER_KINDS + GP_AGREEMENT_KINDS), list(events)))
+    # an app decision newer than the last read-back wins over the label read back (coder review: a second app
+    # correction, or one made while the Subject fields are unpublished, must not be lost); older ones the label owns
+    last_rb = cur.execute(LAST_READBACK_SQL).fetchone()[0]
+    newer = lambda at: last_rb is None or at > last_rb
+    ev_codes = {d: [c for c in (v or []) if isinstance(c, str) and CODE_RE.match(c)] for d, v, at in cur.execute(EVENTS_SQL, ("subject_codes", "subject_codes")) if newer(at) and isinstance(v, list)}
+    ev_person = {d: (v if isinstance(v, str) and STAFF_EMAIL.match(v) else None) for d, v, at in cur.execute(EVENTS_SQL, ("subject_person", "subject_person")) if newer(at)}
+    events = ev_codes
+    cur.execute(DOCS_SQL, (list(ROSTER_KINDS + GP_AGREEMENT_KINDS), list(set(ev_codes) | set(ev_person))))
     docs = {r[0]: r for r in cur.fetchall()}
     ids = list(docs)
     files = collections.defaultdict(list)
@@ -251,11 +261,10 @@ def run(conn, apply=False, staff=None, log=print):
         is_pers = personnel(names)
         roster_doc = kind in ROSTER_KINDS or (kind in GP_AGREEMENT_KINDS and entities & gp_entities)
         outcome, matches, rule = "not_a_roster_kind", [], None
-        person_codes = conf if conf is not None else (
-            [c for c in (events.get(did) or []) if isinstance(c, str) and CODE_RE.match(c)] if did in events else None)
+        person_codes = events[did] if did in events else conf
         if person_codes is not None:
             outcome = "confirmed" if person_codes else "confirmed_none"
-            matches = [(p, None, "label" if conf is not None else "person") for p in person_codes]
+            matches = [(p, None, "person" if did in events else "label") for p in person_codes]
             rule = "SUBJ-PERSON"
         elif roster_doc and kind in ("k1", "capital_statement") and issuing in gp_of_fund and gp_of_fund[issuing][0] in (receiving or ()):
             outcome, matches, rule = "high", [(gp_of_fund[issuing][1], issuing, "parties")], "SUBJ-PARTIES"
@@ -278,7 +287,8 @@ def run(conn, apply=False, staff=None, log=print):
         auto = sorted(p for p, _, m in matches) if outcome == "high" else None
         for p, e, m in matches:
             rows_party.append((did, p, e, m, "confirmed" if outcome.startswith("confirmed") else outcome))
-        sp = staff_match(staff, names) if (staff and is_pers) else None
+        # without the directory (no --directory-token) the last machine value is KEPT, never cleared (coder review)
+        sp = (staff_match(staff, names) if is_pers else None) if staff is not None else person_old
         if (auto or None) != (auto_old or None) or sp != person_old or rule != rule_old or bool(is_pers) != bool(pers_old):
             upd.append((auto, sp, rule, is_pers or None, did))
         if labelled and (roster_doc or is_pers or person_codes is not None):
@@ -291,9 +301,9 @@ def run(conn, apply=False, staff=None, log=print):
         cur.execute("TRUNCATE cat.doc_party")
         cur.executemany("INSERT INTO cat.doc_party (document_id, partner_code, entity_code, method, confidence) VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", rows_party)
         cur.executemany("UPDATE cat.document SET subject_codes_auto=%s, subject_person_auto=%s, subject_rule=%s, personnel_auto=%s, updated_at=now() WHERE document_id=%s", upd)
-        # app decisions not yet on the label (e.g. Parties Subject not published yet): kept as the person's value
-        cur.executemany("UPDATE cat.document SET subject_codes_confirmed=%s, updated_at=now() WHERE document_id=%s AND subject_codes_confirmed IS NULL",
-                        [([c for c in v if isinstance(c, str) and CODE_RE.match(c)], d) for d, v in events.items() if isinstance(v, list)])
+        # app decisions newer than the last read-back become the person's values ('{}' = "none"; a cleared person = NULL)
+        cur.executemany("UPDATE cat.document SET subject_codes_confirmed=%s::text[], updated_at=now() WHERE document_id=%s", [(v, d) for d, v in ev_codes.items()])
+        cur.executemany("UPDATE cat.document SET subject_person_confirmed=%s, updated_at=now() WHERE document_id=%s", [(v, d) for d, v in ev_person.items()])
         conn.commit()
     else:
         conn.rollback()
@@ -317,14 +327,15 @@ def load_staff(token_file):
     from googleapiclient.discovery import build
     c = Credentials.from_authorized_user_file(token_file, ["https://www.googleapis.com/auth/directory.readonly"])
     if not c.valid:
-        c.refresh(Request())
+        # CISO review: never refreshed here; bring a fresh short-lived token (outside the repo, deleted after)
+        sys.exit("REFUSED: the directory token is expired; get a fresh one (this step never refreshes it)")
     svc = build("people", "v1", credentials=c, cache_discovery=False)
     out, tok = [], None
     while True:
         r = svc.people().listDirectoryPeople(readMask="names,emailAddresses", sources=["DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE"],
                                              pageSize=500, pageToken=tok).execute()
         for p in r.get("people", []):
-            em = next((e["value"].lower() for e in p.get("emailAddresses", []) if e.get("value", "").lower().endswith("@allegiscapital.com")), None)
+            em = next((e["value"].lower() for e in p.get("emailAddresses", []) if STAFF_EMAIL.match(e.get("value", "").lower())), None)
             nm = [n.get("displayName", "") for n in p.get("names", []) if n.get("displayName")]
             if em and nm:
                 out.append((em, nm))

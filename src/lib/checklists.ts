@@ -161,6 +161,13 @@ export async function overrideWrite(body: unknown, ctx: { session: Session; db: 
   if (action === "not_required" && !note?.trim()) return { status: 400, body: { error: "bad_input", reason: "reason_required" } };
   const req = await ctx.db.rows<{ override_action: string | null }>("SELECT override_action FROM app.v_requirement WHERE req_key = $1", [key]);
   if (!req.length) return { status: 404, body: { error: "not_found" } };
+  if (note) {
+    // CISO review: LP names live only in ref.party / ref.party_alias; a note naming a partner of that entity is refused
+    const names = await ctx.db.rows<{ display_name: string }>("SELECT display_name FROM app.v_party WHERE entity_code = $1", [key.split("|")[1]]);
+    const low = note.toLowerCase();
+    if (names.some((n) => n.display_name && n.display_name.trim().length >= 4 && low.includes(n.display_name.trim().toLowerCase())))
+      return { status: 400, body: { error: "bad_input", reason: "note_names_a_partner_use_the_code" } };
+  }
   if (action === "clear" && !req[0].override_action) return { status: 400, body: { error: "bad_input", reason: "nothing_to_clear" } };
   let fileId: string | null = null, docId: string | null = null;
   if (action === "link") {

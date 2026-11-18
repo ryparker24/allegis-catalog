@@ -162,8 +162,9 @@ ALTER TABLE cat.document
 ALTER TABLE cat.document DROP CONSTRAINT IF EXISTS document_subject_codes;
 DO $$ BEGIN
   ALTER TABLE cat.document ADD CONSTRAINT document_subject_codes CHECK (
-    coalesce(array_to_string(subject_codes_auto, ','), 'LP-00') ~ '^((LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?)(,(LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?)*$' AND
-    coalesce(array_to_string(subject_codes_confirmed, ','), 'LP-00') ~ '^((LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?)(,(LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?)*$' AND
+    -- '{}' = a person's "none" (CISO review: array_to_string('{}') is '' and failed the regex)
+    (cardinality(coalesce(subject_codes_auto, '{}')) = 0 OR array_to_string(subject_codes_auto, ',') ~ '^((LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?)(,(LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?)*$') AND
+    (cardinality(coalesce(subject_codes_confirmed, '{}')) = 0 OR array_to_string(subject_codes_confirmed, ',') ~ '^((LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?)(,(LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?)*$') AND
     cardinality(coalesce(subject_codes_confirmed, '{}')) <= 20 AND cardinality(coalesce(subject_codes_auto, '{}')) <= 20 AND
     coalesce(subject_person_auto, 'x@allegiscapital.com') ~ '^[a-z0-9._%+-]{1,64}@allegiscapital\.com$' AND
     coalesce(subject_person_confirmed, 'x@allegiscapital.com') ~ '^[a-z0-9._%+-]{1,64}@allegiscapital\.com$') NOT VALID;
@@ -321,18 +322,20 @@ CREATE OR REPLACE VIEW app.v_review_queue WITH (security_barrier = true) AS
             COALESCE(d.status_confirmed, d.status_auto) AS status,
             sc.partner_codes AS subject_candidates,
                 CASE
-                    WHEN (v.requires_execution AND (v.stage = 'unknown'::text)) THEN 'stage_unknown'::text
-                    WHEN ((v.stage = 'fully_executed'::text) AND (v.confidence = 'low'::text)) THEN 'low_confidence_executed'::text
-                    WHEN (v.kind IS NULL) THEN 'no_kind'::text
+                    WHEN NOT v.reviewed AND (v.requires_execution AND (v.stage = 'unknown'::text)) THEN 'stage_unknown'::text
+                    WHEN NOT v.reviewed AND ((v.stage = 'fully_executed'::text) AND (v.confidence = 'low'::text)) THEN 'low_confidence_executed'::text
+                    WHEN NOT v.reviewed AND (v.kind IS NULL) THEN 'no_kind'::text
+                    -- Match subject does NOT depend on an earlier Confirm / Wrong review (coder review: files reviewed under
+                    -- WO-01/02 must still reach it); only a Subject decision takes the file out of this lane
                     WHEN sc.document_id IS NOT NULL AND NOT EXISTS (
                          SELECT 1 FROM app.review_event m WHERE m.document_id = v.document_id AND m.source = 'match_subject') THEN 'match_subject'::text
-                    WHEN (NOT COALESCE(v.requires_execution, false) AND COALESCE(d.status_confirmed, d.status_auto) IS NULL) THEN 'status_unknown'::text
+                    WHEN NOT v.reviewed AND (NOT COALESCE(v.requires_execution, false) AND COALESCE(d.status_confirmed, d.status_auto) IS NULL) THEN 'status_unknown'::text
                     ELSE NULL::text
                 END AS queue_reason
            FROM app.v_find v
            LEFT JOIN cat.document d ON d.document_id = v.document_id
            LEFT JOIN app.v_subject_candidates sc ON sc.document_id = v.document_id
-          WHERE (NOT v.reviewed)) q
+          WHERE (NOT v.reviewed OR sc.document_id IS NOT NULL)) q
   WHERE (queue_reason IS NOT NULL);
 
 CREATE OR REPLACE VIEW app.v_review_counts WITH (security_barrier = true) AS
@@ -364,11 +367,13 @@ SELECT e.req_key, e.rule_id, e.checklist, e.subtype_code, e.subject_type, e.enti
        CASE WHEN e.ov_action IS NOT NULL THEN NULL ELSE e.sub_status END AS sub_status,
        CASE e.ov_action WHEN 'not_required' THEN 7 WHEN 'link' THEN 6 ELSE e.urgency END AS urgency,
        CASE WHEN e.ov_action = 'link' THEN lf.file_id ELSE bf.file_id END AS best_file_id,
-       CASE WHEN e.ov_action = 'link' THEN lf.kind ELSE e.best_kind END AS best_kind,
-       CASE WHEN e.ov_action = 'link' THEN lf.stage ELSE e.best_stage END AS best_stage,
-       CASE WHEN e.ov_action = 'link' THEN lf.status ELSE e.best_status END AS best_status,
-       CASE WHEN e.ov_action = 'link' THEN coalesce(lf.signed_date, lf.issued_date, lf.effective_date) ELSE e.best_date END AS best_date,
-       CASE WHEN e.ov_action = 'link' THEN 'linked by a person' WHEN e.ov_action = 'not_required' THEN 'not required (person)' ELSE e.best_reason END AS best_reason,
+       -- a best document that left the app's scope (e.g. now secret tier) shows NOTHING about itself (CISO review)
+       CASE WHEN e.ov_action = 'link' THEN lf.kind WHEN bf.file_id IS NULL THEN NULL ELSE e.best_kind END AS best_kind,
+       CASE WHEN e.ov_action = 'link' THEN lf.stage WHEN bf.file_id IS NULL THEN NULL ELSE e.best_stage END AS best_stage,
+       CASE WHEN e.ov_action = 'link' THEN lf.status WHEN bf.file_id IS NULL THEN NULL ELSE e.best_status END AS best_status,
+       CASE WHEN e.ov_action = 'link' THEN coalesce(lf.signed_date, lf.issued_date, lf.effective_date) WHEN bf.file_id IS NULL THEN NULL ELSE e.best_date END AS best_date,
+       CASE WHEN e.ov_action = 'link' THEN 'linked by a person' WHEN e.ov_action = 'not_required' THEN 'not required (person)'
+            WHEN e.best_file_id IS NOT NULL AND bf.file_id IS NULL THEN 'best document is outside the catalog''s scope' ELSE e.best_reason END AS best_reason,
        CASE WHEN e.ov_action IS NOT NULL THEN 'person' ELSE e.best_source END AS best_source,
        (e.ov_action = 'link' AND lf.file_id IS NULL) OR (e.ov_action IS NULL AND e.best_file_id IS NOT NULL AND bf.file_id IS NULL) AS best_out_of_scope,
        e.candidates, e.n_candidates,

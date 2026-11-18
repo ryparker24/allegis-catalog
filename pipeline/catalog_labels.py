@@ -176,7 +176,8 @@ def handling_raise(e, live, schema):
     if "personnel" not in ch:
         return {}                                           # the Personnel info choice is not published yet
     out = {}
-    if live.get("tier") in (None, "normal"):
+    tier_ch = ((schema.S["handling"]["fields"].get("tier") or {}).get("choices") or {}) if schema.has("tier") else {}
+    if live.get("tier") in (None, "normal") and "restricted" in tier_ch:
         out["tier"] = "restricted"
     if "personnel" not in (live.get("contains") or []):
         out["contains"] = sorted(set(live.get("contains") or []) | {"personnel"})

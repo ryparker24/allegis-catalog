@@ -36,6 +36,9 @@ export async function GET(req: Request) {
     rules: RULES, spec: s, entities: ents.map((e) => e.entity_code),
     years: [...new Set(periods.map((p) => p.fiscal_year).filter((y): y is number => y != null))],
     quarters: periods.some((p) => p.fiscal_quarter != null),
-    counts: Object.fromEntries(counts.map((c) => [c.result, c.n])), matched: rows[0]?.matched ?? 0, rows: out, canWrite: canWrite(g.session),
+    // matched from the scope counts (a page past the end must not read as an empty scope: coder review)
+    counts: Object.fromEntries(counts.map((c) => [c.result, c.n])),
+    matched: counts.filter((c) => !s.results.length || s.results.includes(c.result)).reduce((a, c) => a + c.n, 0),
+    rows: out, canWrite: canWrite(g.session),
   });
 }

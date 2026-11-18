@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: Request) {
   const env = await getEnv();
-  const g = await requireUser(req, env, { route: "directory" });
+  const g = await requireUser(req, env, { route: "directory", write: true });   // the directory consent also grants drive.metadata: scopes stay consistent
   if (!g.ok) return g.response;
   const u = new URL(req.url);
   const next = u.searchParams.get("next") === "/review" ? "/review" : "/";

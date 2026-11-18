@@ -68,6 +68,8 @@ describe("CAT-WO-03 guard: no typed name ever reaches Subject code(s)", () => {
     expect(validateSubject({ person: "someone@gmail.com" })).toEqual({ ok: false, reason: "person_must_be_staff_account" });
     expect(validateSubject({ person: "Alba Brightwater" })).toEqual({ ok: false, reason: "person_must_be_staff_account" });
     expect(validateSubject({ none: true })).toMatchObject({ ok: true, value: { codes: [], none: true } });
+    expect(validateSubject({ codes: [] })).toEqual({ ok: false, reason: "empty_codes_need_none" });   // a person-only edit never clears codes
+    expect(validateSubject({ person: "alba.b@allegiscapital.com" })).toMatchObject({ ok: true, value: { codes: null } });
   });
   it("label text read back keeps codes only", () => {
     expect(codesFromText("LP-0001, Zephyrine Quillfeather, GM-0002")).toEqual(["GM-0002", "LP-0001"]);
@@ -150,6 +152,13 @@ describe("CAT-WO-03 overrides", () => {
     expect(execs.length).toBe(0);
     expect((await overrideWrite({ req_key: KEY, action: "link", file_id: F1 }, { session, db: D, fetch: f as never })).status).toBe(200);
     expect(execs[0].text).toContain("INSERT INTO app.requirement_override");
+  });
+  it("a note naming a partner of that entity is refused (names live only in ref.party)", async () => {
+    const { D, execs } = fakeDb((text) => text.includes("v_requirement") ? [{ override_action: null }] : text.includes("v_party") ? [{ display_name: "Zephyrine Quillfeather Trust" }] : []);
+    const r = await overrideWrite({ req_key: KEY, action: "not_required", note: "waived for zephyrine quillfeather trust" }, { session, db: D });
+    expect(r.body).toMatchObject({ reason: "note_names_a_partner_use_the_code" });
+    expect(execs.length).toBe(0);
+    expect((await overrideWrite({ req_key: KEY, action: "not_required", note: "LP-0001 waived (redeemed)" }, { session, db: D })).status).toBe(200);
   });
   it("a bad key or action is refused", async () => {
     const { D } = fakeDb(() => []);

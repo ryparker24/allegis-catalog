@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 /** POST /api/checklists/override {req_key, action: link|not_required|clear, file_id?, note?} -> one append-only row. No Drive write. */
 export async function POST(req: Request) {
   const env = await getEnv();
-  const g = await requireUser(req, env, { route: "checklists_override" });
+  const g = await requireUser(req, env, { route: "checklists_override", write: true, next: "/review" });   // CISO review: never from a read-only session
   if (!g.ok) return g.response;
   const r = await overrideWrite(await req.json().catch(() => null), { session: g.session, db: db(env) });
   return json(r.body, r.status);

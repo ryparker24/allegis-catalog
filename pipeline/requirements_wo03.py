@@ -166,9 +166,18 @@ def subjects(rule, app, party, etype, today):
     need_app = ef.get("applicability") == "required"
     pers = periods(rule["subject_type"], rule["period_from"], today)
     per_partner = "partner" in rule["subject_type"]
+    # one Datum company kind per entity, deterministic (fund > spv > gp) when two companies map to one entity
+    rank = {"fund": 0, "spv": 1, "gp": 2}
     roster_ckind = {}
     for p in party:
-        roster_ckind.setdefault(p["entity"], p["ckind"])
+        k = roster_ckind.get(p["entity"])
+        if k is None or rank.get(p["ckind"], 9) < rank.get(k, 9):
+            roster_ckind[p["entity"]] = p["ckind"]
+    # entity-level rules (audited FS) don't need a roster: catalog entities of the type count too (coder review)
+    scope_ckind = dict(roster_ckind)
+    if not per_partner:
+        for e, t in etype.items():
+            scope_ckind.setdefault(e, t)
     out = []
 
     def entity_ok(e, ckind):
@@ -183,7 +192,7 @@ def subjects(rule, app, party, etype, today):
             return False if a is None or not a else None
         return False
 
-    for e, ckind in sorted(roster_ckind.items()):
+    for e, ckind in sorted(scope_ckind.items()):
         ok = entity_ok(e, ckind)
         if ok is False:
             continue
@@ -209,7 +218,12 @@ def subjects(rule, app, party, etype, today):
             if t in rtypes and e not in roster_ckind:
                 for fy, q in pers:
                     out.append((e, None, fy, q, "no_roster"))
-    return out
+    seen, uniq = set(), []                    # one row per key (two relationships of one partner -> one requirement)
+    for x in out:
+        k = (x[0], x[1], x[2], x[3])
+        if k not in seen:
+            seen.add(k); uniq.append(x)
+    return uniq
 
 
 def build(cur, today, log=print):
@@ -261,7 +275,10 @@ def build(cur, today, log=print):
                 ld = by_file.get(ov["file_id"]) or by_doc.get(ov["document_id"])
                 link_doc = ld and {"document_id": ld["document_id"], "file_id": ov["file_id"], "kind": ld["kind"], "stage": ld["stage"],
                                    "status": ld["status"], "date": ld["dt"].isoformat() if ld["dt"] else None}
-            result, sub, best, ranked, ov_id = evaluate(cands, sw, ov, no_cand, link_doc)
+            # the MACHINE result is stored; app.v_requirement applies the latest override at read time, so Link / Not required /
+            # Clear show at once and the rebuild never undoes them (coder review: storing the override broke Clear)
+            result, sub, best, ranked, _ = evaluate(cands, sw, None, no_cand)
+            ov_id = ov["override_id"] if ov else None
             urg = URGENCY[sub] if result == "on_file" else URGENCY[result]
             rows.append(dict(base, result=result, sub_status=sub, urgency=urg, best=best, cands=ranked, override_id=ov_id))
             mix[rule["rule_id"]][result if result != "on_file" else f"on_file:{sub}"] += 1
@@ -282,7 +299,7 @@ def reason(best, result, sub):
 
 
 def write(cur, run, rows):
-    cur.execute("TRUNCATE ops.requirement")
+    cur.execute("DELETE FROM ops.requirement")   # not TRUNCATE: no ACCESS EXCLUSIVE lock, app reads keep working (coder review)
     data = []
     for r in rows:
         b = r["best"]

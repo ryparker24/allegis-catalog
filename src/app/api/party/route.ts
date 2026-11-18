@@ -1,26 +1,33 @@
 import { getEnv } from "@/lib/env";
 import { json, requireUser } from "@/lib/guard";
 import { db } from "@/lib/db";
+import { FILE_ID_RE } from "@/lib/google";
+import { liveWritable } from "@/lib/editflow";
+import { logEvent } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
-const ENT = /^[A-Za-z0-9()_ -]{1,40}$/;
-const CODE = /^(LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?$/;
 
 /**
- * GET /api/party?entity=A&entity=B | ?code=LP-0001&code=...  -> roster codes with display names, from app.v_party only.
- * Names are for the screen (pickers, "name beside the code"); this response is no-store and never logged.
+ * GET /api/party?file_id=<id>  -> the roster (codes + display names, app.v_party) of THAT document's entities only,
+ * for the Subject pickers. CISO review: write scope (only the edit forms use it) and the user must be able to open and
+ * label the file (live check), so the roster can't be pulled wholesale. Names are never logged.
  */
 export async function GET(req: Request) {
   const env = await getEnv();
-  const g = await requireUser(req, env, { route: "party" });
+  const g = await requireUser(req, env, { route: "party", write: true });
   if (!g.ok) return g.response;
-  const u = new URL(req.url);
-  const ents = u.searchParams.getAll("entity").filter((e) => ENT.test(e)).slice(0, 20);
-  const codes = u.searchParams.getAll("code").map((c) => c.toUpperCase()).filter((c) => CODE.test(c)).slice(0, 500);
-  if (!ents.length && !codes.length) return json({ parties: [] });
-  const rows = await db(env).rows<{ entity_code: string; partner_code: string; display_name: string; interest_kind: string; is_company_gp: boolean }>(
+  const fileId = new URL(req.url).searchParams.get("file_id") ?? "";
+  if (!FILE_ID_RE.test(fileId)) return json({ error: "bad_file_id" }, 400);
+  const D = db(env);
+  const f = await D.rows<{ entities: string[]; issuing_entity: string | null }>("SELECT entities, issuing_entity FROM app.v_find_x WHERE file_id = $1", [fileId]);
+  if (!f.length) return json({ error: "no_access" }, 403);
+  const acc = await liveWritable(g.session.at, [fileId]);
+  if (acc.expired) return json({ error: "signin_required", login: "/api/auth/login" }, 401);
+  if (!acc.ok.length) return json({ error: "no_access" }, 403);
+  const ents = [...new Set([...(f[0].entities ?? []), ...(f[0].issuing_entity ? [f[0].issuing_entity] : [])])];
+  const rows = await D.rows<{ entity_code: string; partner_code: string; display_name: string; interest_kind: string; is_company_gp: boolean }>(
     `SELECT entity_code, partner_code, display_name, interest_kind, is_company_gp FROM app.v_party
-     WHERE ($1::text[] = '{}' OR entity_code = ANY($1::text[])) AND ($2::text[] = '{}' OR partner_code = ANY($2::text[]))
-     ORDER BY entity_code, partner_code LIMIT 2000`, [ents, codes]);
+     WHERE entity_code = ANY($1::text[]) ORDER BY entity_code, partner_code LIMIT 500`, [ents]);
+  logEvent("party_read", { file_id: fileId, count: rows.length });
   return json({ parties: rows });
 }

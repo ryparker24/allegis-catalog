@@ -73,10 +73,13 @@ oid = cur.fetchone()[0]; conn.commit()
 rebuild(conn); rebuild(conn)
 built = cur.execute("SELECT result, override_id FROM ops.requirement WHERE req_key = %s", (key,)).fetchone()
 shown = cur.execute("SELECT result, override_action FROM app.v_requirement WHERE req_key = %s", (key,)).fetchone()
-check("G-W4 test_override_survives_two_rebuilds", built == ("not_required", oid) and shown == ("not_required", "not_required"), f"{built} {shown}")
+# the build stores the MACHINE result and the override id; the view applies the override (coder review)
+check("G-W4 test_override_survives_two_rebuilds", built == (before, oid) and shown == ("not_required", "not_required"), f"{built} {shown}")
 cur.execute("INSERT INTO app.requirement_override (req_key, action, by_email) VALUES (%s, 'clear', 'guard-test@allegiscapital.com')", (key,))
-conn.commit(); rebuild(conn)
-check("G-W4b Clear override returns the row to the machine result", cur.execute("SELECT result FROM app.v_requirement WHERE req_key = %s", (key,)).fetchone()[0] == before)
+conn.commit()
+check("G-W4b Clear override returns the row to the machine result AT ONCE (no rebuild needed)",
+      cur.execute("SELECT result, override_action FROM app.v_requirement WHERE req_key = %s", (key,)).fetchone() == (before, None))
+rebuild(conn)
 
 # ---------------------------------------------------------------- G-W5 a document marked Wrong is never best
 cur.execute("""SELECT req_key, best_document_id, best_file_id FROM ops.requirement WHERE best_document_id IS NOT NULL AND best_source = 'auto'
@@ -137,7 +140,8 @@ any_doc = cur.execute("SELECT document_id FROM cat.document LIMIT 1").fetchone()
 check("G-W7 test_no_typed_name_reaches_subject_codes (CHECK refuses a name, accepts codes)",
       refused("UPDATE cat.document SET subject_codes_auto = ARRAY['Zephyrine Quillfeather'] WHERE document_id = %s", (any_doc,))
       and refused("UPDATE cat.document SET subject_person_auto = 'someone@gmail.com' WHERE document_id = %s", (any_doc,))
-      and not refused("UPDATE cat.document SET subject_codes_auto = ARRAY['LP-0001'] WHERE document_id = %s", (any_doc,)))
+      and not refused("UPDATE cat.document SET subject_codes_auto = ARRAY['LP-0001'] WHERE document_id = %s", (any_doc,))
+      and not refused("UPDATE cat.document SET subject_codes_confirmed = '{}'::text[] WHERE document_id = %s", (any_doc,)))   # a person's "none" (CISO review)
 check("G-W7b cat.doc_party refuses a non-code partner", refused("INSERT INTO cat.doc_party (document_id, partner_code, method, confidence) VALUES (%s, 'Some Name', 'name', 'high')", (any_doc,)))
 check("G-W8 test_requirement_override_is_append_only (UPDATE / DELETE / TRUNCATE refused, even for the owner)",
       refused("UPDATE app.requirement_override SET note = 'x' WHERE override_id = %s", (oid,))
