@@ -324,3 +324,9 @@ input[type=checkbox] { accent-color: var(--ink); width: 14px; height: 14px; marg
 .title-row .page-title { margin: 0; }
 .grid th .resize:focus-visible { background: rgba(28,28,28,.35); outline: none; }
 @media (max-width: 480px) { .btn-rail .lbl { display: none; } .search { max-width: none; } }
+
+/* CAT-WO-02 · Review queue: lane cards act as filters (Datum linked cards) */
+button.ctr.kpi { font: inherit; text-align: left; color: var(--ink); cursor: pointer; }
+.ctr.kpi.link-card:hover { border-color: rgba(28,28,28,.4); }
+.ctr.kpi.link-card.on { border-color: var(--ink); box-shadow: inset 3px 0 0 var(--signal), var(--shadow-card); }
+.grid.queue td.why { color: var(--muted); font-size: 12px; }

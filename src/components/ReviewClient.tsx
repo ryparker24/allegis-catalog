@@ -1,11 +1,15 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, show, type NotShown, type Row } from "./client";
 import { SidePanel } from "./SidePanel";
-import { VOCAB } from "@/lib/vocab";
+import { PageHeader } from "./AppShell";
+import { PickList, Pop, RangeInputs } from "./FindClient";
+import { shownName } from "./bus";
+import { Icon } from "./icons";
+import { VOCAB, display, type VocabList } from "@/lib/vocab";
 
 type Counts = { stage_unknown?: number; low_confidence_executed?: number; no_kind?: number; open_total?: number; reviewed_today?: number; reviewed_total?: number };
-export type Resp = { counts: Counts; page: number; nextPage: number | null; pageRows: number; rows: Row[]; notShown: NotShown; canWrite: boolean };
+export type Resp = { counts: Counts; page: number; pageSize?: number; matched?: number; nextPage: number | null; pageRows: number; rows: Row[]; notShown: NotShown; canWrite: boolean };
 
 const REASON: Record<string, string> = { stage_unknown: "Stage unknown", low_confidence_executed: "Fully executed (low confidence)", no_kind: "No kind" };
 const SIGNAL: Record<string, string> = {
@@ -16,6 +20,29 @@ const SIGNAL: Record<string, string> = {
 const STAGES = ["draft", "final_unexecuted", "partially_executed", "fully_executed", "n_a"] as const;
 const SKIP_KEY = "catalog.review.skipped";
 const SKIP_MAX = 400; // the server reads at most 500; keeps the query string well under URL limits
+const PAGE_SIZES = [10, 25, 100];
+
+// ------------------------------------------------------------------ list state (CAT-WO-02 item 2: Datum lists on the queue)
+type Range = { from?: string; to?: string };
+export type ReviewListState = {
+  lanes: string[];
+  filters: { kind?: string[]; entity?: string[]; stage?: string[]; fy_range?: Range };
+  sort: { col: string; dir: "asc" | "desc" };
+  pageSize: number;
+  widths: Record<string, number>;
+};
+export const DEFAULT_LIST: ReviewListState = { lanes: [], filters: {}, sort: { col: "queue", dir: "asc" }, pageSize: 25, widths: {} };
+type Col = { key: string; label: string; width: number; sort?: string; filter?: "lane" | "kind" | "entity" | "stage" | "fy" };
+const COLS: Col[] = [
+  { key: "name", label: "File", width: 300 },
+  { key: "why", label: "Why", width: 300, sort: "queue", filter: "lane" },
+  { key: "stage", label: "Signing stage", width: 150, sort: "stage", filter: "stage" },
+  { key: "kind", label: "Kind", width: 160, sort: "kind", filter: "kind" },
+  { key: "entities", label: "Entity", width: 120, sort: "entities", filter: "entity" },
+  { key: "fiscal_year", label: "Fiscal year", width: 100, sort: "fiscal_year", filter: "fy" },
+  { key: "confidence", label: "Confidence", width: 110, sort: "confidence" },
+];
+type Facet = { value: string; n: number; label?: string };
 
 function why(r: Row): string {
   const parts = [REASON[r.queue_reason ?? ""] ?? r.queue_reason ?? ""];
@@ -29,6 +56,8 @@ function why(r: Row): string {
 function loadSkipped(): string[] {
   try { return JSON.parse(sessionStorage.getItem(SKIP_KEY) ?? "[]"); } catch { return []; }
 }
+const activeFilters = (l: ReviewListState) =>
+  l.lanes.length + (l.filters.kind?.length ? 1 : 0) + (l.filters.entity?.length ? 1 : 0) + (l.filters.stage?.length ? 1 : 0) + (l.filters.fy_range?.from || l.filters.fy_range?.to ? 1 : 0);
 
 export function ReviewClient() {
   const [data, setData] = useState<Resp | null>(null);
@@ -38,16 +67,41 @@ export function ReviewClient() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [list, setList] = useState<ReviewListState>(DEFAULT_LIST);
+  const [ready, setReady] = useState(false);
+  const [facets, setFacets] = useState<Record<string, Facet[]> | null>(null);
   // A failed load must show on the page itself (CAT-WO-01.1): the side panel is closed when nothing is selected.
   const onLoadError = useCallback((e: unknown) => setLoadError(loadErrorText(e)), []);
+  const listRef = useRef(list);
+  listRef.current = list;
 
   const load = useCallback(async (skip: string[], page = 0) => {
-    const r = await api<Resp>(`/api/review?page=${page}&skip=${encodeURIComponent(skip.join(","))}`);
+    const l = listRef.current;
+    const spec = { filters: l.filters, sort: l.sort, pageSize: l.pageSize };
+    const r = await api<Resp>(`/api/review?page=${page}&skip=${encodeURIComponent(skip.join(","))}&spec=${encodeURIComponent(JSON.stringify(spec))}&lane=${encodeURIComponent(l.lanes.join(","))}`);
     setData(r);
     setLoadError(null);
     setCur(r.rows[0] ?? null);
   }, []);
-  useEffect(() => { const s = loadSkipped(); setSkipped(s); load(s).catch(onLoadError); }, [load, onLoadError]);
+  // start: the last list state for this user (item 2), then the first page
+  useEffect(() => {
+    api<Record<string, Facet[]>>("/api/facets").then(setFacets).catch(() => {});
+    (async () => {
+      try {
+        const p = await api<{ value: Partial<ReviewListState> & { lanes?: string[] } | null }>("/api/prefs?key=review");
+        if (p.value) setList({ ...DEFAULT_LIST, ...p.value, filters: (p.value.filters as ReviewListState["filters"]) ?? {}, lanes: p.value.lanes ?? [], widths: p.value.widths ?? {} });
+      } catch { /* defaults */ }
+      setReady(true);
+    })();
+  }, []);
+  useEffect(() => {
+    if (!ready) return;
+    const s = loadSkipped(); setSkipped(s); load(s).catch(onLoadError);
+    const t = setTimeout(() => {
+      api("/api/prefs", { method: "PUT", body: JSON.stringify({ key: "review", value: { filters: list.filters, sort: list.sort, pageSize: list.pageSize, lanes: list.lanes, widths: list.widths } }) }).catch(() => {});
+    }, 800);
+    return () => clearTimeout(t);
+  }, [ready, list, load, onLoadError]);
   useEffect(() => {
     if (!cur) return;
     const stage = cur.stage && cur.stage !== "unknown" ? cur.stage : cur.stage_suggested && cur.stage_suggested !== "unknown" ? cur.stage_suggested : "";
@@ -65,6 +119,11 @@ export function ReviewClient() {
     try { sessionStorage.setItem(SKIP_KEY, JSON.stringify(s)); } catch { /* storage unavailable: skip for this view only */ }
     const n = next(data.rows, cur.file_id);
     if (n) setCur(n); else load(s, data.page).catch(onLoadError);
+  };
+  const clearSkipped = () => {
+    setSkipped([]);
+    try { sessionStorage.removeItem(SKIP_KEY); } catch { /* ignore */ }
+    load([], 0).catch(onLoadError);
   };
   const confirm = async () => {
     if (!cur) return;
@@ -85,7 +144,8 @@ export function ReviewClient() {
   return (
     <ReviewView data={data} cur={cur} skipped={skipped} form={form} busy={busy} msg={msg} loadError={loadError}
       setCur={setCur} setForm={setForm} onConfirm={confirm} onSkip={skip}
-      onNextPage={(p) => load(skipped, p).catch(onLoadError)} />
+      onNextPage={(p) => load(skipped, p).catch(onLoadError)}
+      list={list} setList={(l) => setList(l)} facets={facets} onClearSkipped={clearSkipped} />
   );
 }
 
@@ -101,50 +161,162 @@ type Form = { status: string; stage: string; executed_date: string; note: string
 export interface ReviewViewProps {
   data: Resp | null; cur: Row | null; skipped: string[]; form: Form; busy: boolean; msg: string | null; loadError?: string | null;
   setCur: (r: Row | null) => void; setForm: (f: Form) => void; onConfirm: () => void; onSkip: () => void; onNextPage: (page: number) => void;
+  // CAT-WO-02 (optional, so the CAT-WO-01.1 render tests keep their props)
+  list?: ReviewListState; setList?: (l: ReviewListState) => void; facets?: Record<string, Facet[]> | null; onClearSkipped?: () => void;
+}
+
+/** Dashboard-style counter card (Datum): caption, big number, one-line explanation. A lane card filters the list. */
+function Kpi({ cap, n, exp, on, onClick }: { cap: string; n: number; exp: string; on?: boolean; onClick?: () => void }) {
+  const body = (<><span className="k-cap">{cap}</span><span className="k-num">{n.toLocaleString()}</span><span className="k-exp">{exp}</span></>);
+  return onClick
+    ? <button type="button" className={`ctr kpi link-card${on ? " on" : ""}`} onClick={onClick} aria-pressed={!!on}>{body}</button>
+    : <div className="ctr kpi">{body}</div>;
 }
 
 /** Presentational part of the Review page (no fetching), so it can be rendered in tests. */
-export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, setCur, setForm, onConfirm, onSkip, onNextPage }: ReviewViewProps) {
+export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, setCur, setForm, onConfirm, onSkip, onNextPage, list = DEFAULT_LIST, setList, facets, onClearSkipped }: ReviewViewProps) {
   const c = data?.counts ?? {};
+  const [pop, setPop] = useState<string | null>(null);
+  const [popAt, setPopAt] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const closePop = useCallback(() => setPop(null), []);
+  const upd = (l: Partial<ReviewListState>) => setList?.({ ...list, ...l });
+  const toggleLane = (lane: string) => upd({ lanes: list.lanes.includes(lane) ? list.lanes.filter((x) => x !== lane) : [...list.lanes, lane] });
+  const width = (k: string) => list.widths[k] ?? COLS.find((x) => x.key === k)!.width;
+  const startResize = (k: string, e: React.PointerEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    const x0 = e.clientX, w0 = width(k);
+    const move = (ev: PointerEvent) => upd({ widths: { ...list.widths, [k]: Math.max(60, Math.min(900, Math.round(w0 + ev.clientX - x0))) } });
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
+  const sortBy = (col: string) => upd({ sort: { col, dir: list.sort.col === col && list.sort.dir === "asc" ? "desc" : "asc" } });
+  const label = (v: VocabList | undefined) => (o: Facet) => o.label ?? (v && o.value !== "(none)" ? display(v, o.value) : o.value);
+  const filterBody = (f: Col["filter"]) => {
+    if (f === "lane") return (
+      <div className="opts">{Object.entries(REASON).map(([k, l]) => (
+        <label key={k} className="opt"><input type="checkbox" checked={list.lanes.includes(k)} onChange={() => toggleLane(k)} /> {l}</label>
+      ))}</div>
+    );
+    if (f === "fy") return <RangeInputs type="year" value={list.filters.fy_range ?? {}} onChange={(r) => { upd({ filters: { ...list.filters, fy_range: r } }); setPop(null); }} />;
+    const key = f === "kind" ? "kind" : f === "entity" ? "entity" : "stage";
+    const v = ((list.filters as Record<string, string[] | undefined>)[key]) ?? [];
+    return <PickList options={facets?.[key] ?? []} value={v} onChange={(x) => upd({ filters: { ...list.filters, [key]: x } })} label={label(key === "entity" ? undefined : (key as VocabList))} />;
+  };
+  const isOn = (f: Col["filter"]) => f === "lane" ? list.lanes.length > 0 : f === "fy" ? !!(list.filters.fy_range?.from || list.filters.fy_range?.to)
+    : !!((list.filters as Record<string, string[] | undefined>)[f === "kind" ? "kind" : f === "entity" ? "entity" : "stage"]?.length);
+  const nFilters = activeFilters(list);
+  const rows = (data?.rows ?? []).filter((r) => !skipped.includes(r.file_id));
+  const pageSize = data?.pageSize ?? list.pageSize;
+  const from = data && data.matched ? data.page * pageSize + 1 : 0;
+  const to = data ? data.page * pageSize + data.pageRows : 0;
+  const cell = (r: Row, k: string) =>
+    k === "name" ? shownName(r.name, r.file_id) : k === "why" ? why(r) : k === "confidence" ? (r.confidence ?? "") : show(k, (r as unknown as Record<string, unknown>)[k]);
+
   return (
     <div className="review">
+      <PageHeader
+        title="Review queue"
+        info={<>Files the catalog wants a person to check, most uncertain first: signing stage unknown, then fully executed at low confidence, then no kind. Each page is checked live against Drive as you; Confirm writes the Execution and Catalog Review labels on the file.</>}
+        actions={setList ? <>
+          <div className="pop-wrap">
+            <button className="btn" aria-label="More actions" aria-expanded={pop === "more"} onClick={() => setPop(pop === "more" ? null : "more")}><Icon name="more" /></button>
+            <Pop open={pop === "more"} onClose={closePop} className="menu">
+              <button disabled={!skipped.length} onClick={() => { setPop(null); onClearSkipped?.(); }}>Bring back skipped files ({skipped.length})</button>
+              <button onClick={() => { setPop(null); setList({ ...DEFAULT_LIST }); }}>Reset filters, sort and columns</button>
+            </Pop>
+          </div>
+        </> : null}
+      />
       <div className="counters">
-        <div className="ctr"><b>{(c.open_total ?? 0).toLocaleString()}</b><span>open</span></div>
-        <div className="ctr"><b>{(c.stage_unknown ?? 0).toLocaleString()}</b><span>Stage unknown</span></div>
-        <div className="ctr"><b>{(c.low_confidence_executed ?? 0).toLocaleString()}</b><span>Executed, low confidence</span></div>
-        <div className="ctr"><b>{(c.no_kind ?? 0).toLocaleString()}</b><span>No kind</span></div>
-        <div className="ctr"><b>{(c.reviewed_today ?? 0).toLocaleString()}</b><span>reviewed today</span></div>
-        <div className="ctr"><b>{skipped.length}</b><span>skipped (this session)</span></div>
+        <Kpi cap="Open" n={c.open_total ?? 0} exp="Files waiting for a person, across all lanes." />
+        <Kpi cap="Stage unknown" n={c.stage_unknown ?? 0} exp="Signed documents whose signing stage couldn't be read." on={list.lanes.includes("stage_unknown")} onClick={setList ? () => toggleLane("stage_unknown") : undefined} />
+        <Kpi cap="Executed, low confidence" n={c.low_confidence_executed ?? 0} exp="Marked fully executed, but the scan isn't sure." on={list.lanes.includes("low_confidence_executed")} onClick={setList ? () => toggleLane("low_confidence_executed") : undefined} />
+        <Kpi cap="No kind" n={c.no_kind ?? 0} exp="The catalog couldn't tell what the document is." on={list.lanes.includes("no_kind")} onClick={setList ? () => toggleLane("no_kind") : undefined} />
+        <Kpi cap="Reviewed today" n={c.reviewed_today ?? 0} exp="Confirmed or marked wrong since midnight." />
+        <Kpi cap="Skipped" n={skipped.length} exp="Set aside in this browser session; nothing written." />
       </div>
       {loadError ? (
         <div className="status error" role="alert">
           Could not load the review queue: {loadError}. Reload the page to try again; if it keeps failing, sign in again.
         </div>
       ) : null}
-      {data?.notShown.total ? (
-        <div className="status warn">
-          {data.notShown.noAccess ? `${data.notShown.noAccess} not shown (no access)` : ""}{data.notShown.noAccess && data.notShown.checkFailed ? " · " : ""}
-          {data.notShown.checkFailed ? `${data.notShown.checkFailed} not shown (Drive check failed - retry)` : ""}
-        </div>
-      ) : null}
-      <div className="review-body">
-        <table className="grid queue">
-          <thead><tr><th>file</th><th>why</th><th>stage</th><th>kind</th></tr></thead>
-          <tbody>
-            {(data?.rows ?? []).filter((r) => !skipped.includes(r.file_id)).map((r) => (
-              <tr key={r.file_id} onClick={() => setCur(r)} className={cur?.file_id === r.file_id ? "sel" : ""}>
-                <td className="name">{r.name}</td>
-                <td className="why">{why(r)}</td>
-                <td>{show("stage", r.stage)}{r.changed.includes("stage") ? <span className="chg">changed in Drive</span> : null}</td>
-                <td>{show("kind", r.kind)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className={cur ? "find with-panel" : "find"}>
+        <section className="card list-card" aria-label="Review queue">
+          <div className="filterbar">
+            <span className="summary">{nFilters ? `${nFilters} filter${nFilters > 1 ? "s" : ""}` : "No filters"}</span>
+            {nFilters && setList ? <button className="link small" onClick={() => upd({ lanes: [], filters: {} })}>Clear all</button> : null}
+            <div className="tools">
+              {data?.notShown.total ? (
+                <span className="small warn">
+                  {data.notShown.noAccess ? `${data.notShown.noAccess} not shown (no access)` : ""}{data.notShown.noAccess && data.notShown.checkFailed ? " · " : ""}
+                  {data.notShown.checkFailed ? `${data.notShown.checkFailed} not shown (Drive check failed - retry)` : ""}
+                </span>
+              ) : null}
+            </div>
+          </div>
+          {data ? (
+            <div className="pager">
+              <div className="left"><span>{data.matched == null ? `${data.pageRows} on this page` : data.pageRows ? `${from.toLocaleString()}–${to.toLocaleString()} of ${data.matched.toLocaleString()} files` : `None shown on this page · ${data.matched.toLocaleString()} files`}</span></div>
+              <div className="left">
+                {setList ? <><span className="cap">Per page</span>
+                  <div className="seg">{PAGE_SIZES.map((n) => <button key={n} className={list.pageSize === n ? "on" : ""} onClick={() => upd({ pageSize: n })}>{n}</button>)}</div></> : null}
+                <div className="pages">
+                  <button className="pg" disabled={!data.page} onClick={() => onNextPage(Math.max(0, data.page - 1))} aria-label="Previous page">‹</button>
+                  <button className="pg on" aria-current="page">{(data.page + 1).toLocaleString()}</button>
+                  <button className="pg" disabled={data.nextPage == null} onClick={() => data.nextPage != null && onNextPage(data.nextPage)} aria-label="Next page">›</button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <div className="grid-wrap">
+            <table className="grid queue" style={{ width: COLS.reduce((n, x) => n + width(x.key), 0) }}>
+              <colgroup>{COLS.map((x) => <col key={x.key} style={{ width: width(x.key) }} />)}</colgroup>
+              <thead><tr>{COLS.map((x) => {
+                const on = list.sort.col === x.sort;
+                const fid = `rf-${x.key}`;
+                return (
+                  <th key={x.key} aria-sort={on ? (list.sort.dir === "asc" ? "ascending" : "descending") : undefined}>
+                    <div className="th">
+                      <span className={`lbl${x.sort && setList ? " sortable" : ""}`} onClick={() => x.sort && setList && sortBy(x.sort)}>{x.label}</span>
+                      {x.sort && setList ? <span className={`sort${on ? " on" : ""}`} aria-hidden="true">{on ? (list.sort.dir === "asc" ? "↑" : "↓") : "↕"}</span> : null}
+                      {x.filter && setList ? (
+                        <span className="pop-wrap" style={{ marginLeft: "auto" }}>
+                          <button className={`fbtn${isOn(x.filter) ? " on" : ""}`} aria-label={`Filter ${x.label}`} aria-expanded={pop === fid}
+                            onClick={(e) => { e.stopPropagation(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setPopAt({ top: r.bottom + 6, left: Math.max(8, Math.min(r.right - 320, window.innerWidth - 336)) }); setPop(pop === fid ? null : fid); }}>
+                            <Icon name="filter" />
+                          </button>
+                          <Pop open={pop === fid} onClose={closePop} className="popover fixed" style={popAt}>{filterBody(x.filter)}</Pop>
+                        </span>
+                      ) : null}
+                    </div>
+                    {setList ? <span className="resize" role="separator" aria-orientation="vertical" aria-label={`Resize ${x.label}`} onPointerDown={(e) => startResize(x.key, e)} /> : null}
+                  </th>
+                );
+              })}</tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.file_id} onClick={() => setCur(r)} className={cur?.file_id === r.file_id ? "sel" : ""}>
+                    {COLS.map((x) => (
+                      <td key={x.key} className={x.key === "why" ? "why" : x.key === "name" ? "name" : undefined} title={x.key === "why" || x.key === "name" ? String(cell(r, x.key)) : undefined}>
+                        {cell(r, x.key)}
+                        {x.key === "stage" && r.changed.includes("stage") ? <span className="chg">changed in Drive</span> : null}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+                {data && !rows.length ? (
+                  <tr><td className="empty" colSpan={COLS.length}>
+                    Nothing shown on this page.{data.nextPage != null ? <> <button className="link" onClick={() => onNextPage(data.nextPage!)}>Next page</button></> : null}
+                  </td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </section>
         {cur ? (
           <SidePanel row={cur} onClose={() => setCur(null)}>
             <form className="review-form" onSubmit={(e) => { e.preventDefault(); onConfirm(); }}>
-              <p className="why"><b>Why:</b> {why(cur)}</p>
+              <p className="why small"><b>Why:</b> {why(cur)}</p>
               <fieldset>
                 <legend>Execution label</legend>
                 <label>Stage
@@ -171,7 +343,7 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
               {msg ? <p className="status">{msg}</p> : null}
             </form>
           </SidePanel>
-        ) : data && !data.rows.length ? <p className="center muted">Nothing shown on this page.{data.nextPage != null ? <> <button onClick={() => onNextPage(data.nextPage!)}>Next page</button></> : null}</p> : null}
+        ) : null}
       </div>
     </div>
   );

@@ -85,13 +85,13 @@ function fingerprint(x: Record<string, unknown>): string {
 }
 
 // ------------------------------------------------------------------ small pieces
-function Pop({ open, onClose, children, className = "popover", style }: { open: boolean; onClose: () => void; children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
+export function Pop({ open, onClose, children, className = "popover", style }: { open: boolean; onClose: () => void; children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
   const ref = useRef<HTMLDivElement | null>(null);
   useOutside(ref, onClose, open);
   return open ? <div ref={ref} className={className} style={style} onClick={(e) => e.stopPropagation()}>{children}</div> : null;
 }
 
-function PickList({ options, value, onChange, label }: { options: Facet[]; value: string[]; onChange: (v: string[]) => void; label: (o: Facet) => string }) {
+export function PickList({ options, value, onChange, label }: { options: Facet[]; value: string[]; onChange: (v: string[]) => void; label: (o: Facet) => string }) {
   const [q, setQ] = useState("");
   const t = q.trim().toLowerCase();
   const shown = options.filter((o) => !t || o.value.toLowerCase().includes(t) || label(o).toLowerCase().includes(t));
@@ -113,7 +113,7 @@ function PickList({ options, value, onChange, label }: { options: Facet[]; value
   );
 }
 
-function RangeInputs({ type, value, onChange }: { type: "year" | "date"; value: Range; onChange: (r: Range) => void }) {
+export function RangeInputs({ type, value, onChange }: { type: "year" | "date"; value: Range; onChange: (r: Range) => void }) {
   const [a, setA] = useState(value.from ?? "");
   const [b, setB] = useState(value.to ?? "");
   const commit = () => onChange({ from: a || undefined, to: b || undefined });

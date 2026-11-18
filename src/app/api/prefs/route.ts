@@ -6,7 +6,7 @@ import { parseLayout, parseSpec, SpecError } from "@/lib/find";
 export const dynamic = "force-dynamic";
 
 /** Item 2: the last list state per user ("find"). Validated like a saved view; search text is never stored. */
-const KEYS = new Set(["find"]);
+const KEYS = new Set(["find", "review"]);
 
 export async function GET(req: Request) {
   const env = await getEnv();
@@ -26,9 +26,12 @@ export async function PUT(req: Request) {
   if (!KEYS.has(String(b.key))) return json({ error: "bad_key" }, 400);
   let value;
   try {
-    const { search: _search, ...rest } = parseSpec(b.value);
+    const { search: _search, ...rest } = parseSpec(b.key === "review" ? { ...b.value, sort: undefined } : b.value);
     void _search;
-    value = { ...rest, page: 0, ...parseLayout(b.value), viewId: Number.isInteger(b.value?.viewId) ? b.value!.viewId : null };
+    const lanes = Array.isArray(b.value?.lanes) ? (b.value!.lanes as unknown[]).map(String).filter((l) => ["stage_unknown", "low_confidence_executed", "no_kind"].includes(l)) : undefined;
+    // the Review queue sorts on its own columns (queue / confidence / ...): kept as {col, dir} only, validated on use
+    const rsort = b.key === "review" && b.value?.sort && typeof b.value.sort === "object" ? { col: String((b.value.sort as { col?: unknown }).col ?? "queue").slice(0, 20), dir: (b.value.sort as { dir?: unknown }).dir === "asc" ? "asc" : "desc" } : undefined;
+    value = { ...rest, ...(rsort ? { sort: rsort } : {}), page: 0, ...parseLayout(b.value), viewId: Number.isInteger(b.value?.viewId) ? b.value!.viewId : null, ...(lanes ? { lanes } : {}) };
   } catch (e) {
     return json({ error: "bad_spec", reason: e instanceof SpecError ? e.message : "invalid" }, 400);
   }
