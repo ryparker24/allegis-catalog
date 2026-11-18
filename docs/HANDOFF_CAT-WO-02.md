@@ -410,10 +410,122 @@ Measured with `scripts/measure_wo02_item9d.py`, run after 004 + `derive` and bef
 - **5,421 labels gain a kind** from the approved no-kind rules.
 - **The RK2 kinds need the two new Kind choices first.** If the publish has not happened, the re-sync skips those values, because unknown choices are not written.
 
-### Still for Ryan (nothing below is applied)
-- **NK03 / Schwab:** add Schwab to the bank list (about 716 → bank_stmt), or leave them for Review. See above.
-- **ENT-019:** spelled-out "Cyber Innovation Partners II" → CIP-II (750 catalog / 331 labelled). See above.
-- **T1 priority:** 39 as implemented, or 24 as literally ruled (70 more files). See above.
+### Ruled, round 4 (Ryan, 2026-11-18) · applied on the throwaway branch
+- **Schwab is now a bank** (`ISS-004` / `ISS-004P` v2: issuer = bank). NK03 takes the Schwab statement folders.
+  - **NK03 final: 649 labelled / 716 catalog** (none → bank_stmt).
+  - Left for Review, with no kind change: 38 credit-card statements, 16 partner statements, 75 Financial Statements-folder files and 13 others.
+  - **Side effect:** issuer = bank on **1,891** catalog files (1,035 labelled) under Schwab folders or with Schwab in the name. The re-sync writes that issuer to 1,045 labels (count below).
+- **T1** stays at priority 39.
+- **Spelled-out "Cyber Innovation Partners II" → CIP-II:** `ENT-020` / `ENT-020P`. `ENT-019` was taken on main, and the migration guard caught it.
+  - **729** catalog files (316 labelled) gain CIP-II.
+  - 12 of them also carry CIP-III, 2 CIP-I (GP) and 2 X. They are for a look in Review, not changed.
+- **The full Part 2 re-sync is approved** (counts in the release steps).
+- **Tie-break, part 2 (found while counting).** `ops.build_documents` picks the document's kind / fiscal year / issuer from its files with its own `DISTINCT ON`, which had no final key. So tied rules were still a coin-flip at the document level: the re-sync diff moved by 3 files between two derives with no rule change.
+  - 004 restates the function with one change: final keys `s.rule_id, s.value, s.file_id`.
+  - Two derives in a row now give identical results.
+  - The diff is **616** kind changes, not 613: ppm → correspondence 4 are now fixed by rule-ID order (emails named for both LPA and PPM), and the invoice / purchase-agreement flips are gone.
+- **Re-sync fix (found while planning the counts).** When a value isn't yet a choice on the label (e.g. kind operating_agreement before its choice is published), `expected()` turned it into "blank". The re-sync would then have **cleared** Kind on those files.
+  - Such fields are now marked `_unwritable` and skipped, never unset.
+  - Guard test G-S9; pipeline 30/30.
+- **Label publish code:** `labels_setup_wo02.py --create-drafts --release` and `--publish --release` (they refuse to run without `--release`).
+  - **Drafts:** a Parties draft, with the permissions copied from Allegis Document.
+  - **Unpublished changes:** Execution → "Status & Execution" (+ Status, + Issued date); Allegis Document Kind + 2 choices; the Entity choice CYBER-II disabled.
+  - **`--publish`** publishes the three labels and writes the new IDs into `src/lib/labels_schema.json`. CYBER-II is dropped from the app's Entity choices.
+  - Written, not run: running it is a release step.
+
+**Proposed, not applied: one legal-name entity rule per entity, from `company_name` in `datum_exports/datum_partner_roster_2026-11-17.csv`** (`scripts/measure_wo02_legalnames.py`; branch after round 4).
+- **Method:**
+  - Only the company columns are read from the CSV; partner columns are never used.
+  - The pattern is the legal name without L.P. / LLC, as whole words, not followed by a fund number. "Cyber Innovation Partners, L.P." matches "… Partners LP" and "… Partners 2019", but never "… Partners II" / "III" / "2".
+  - It reads the file name and every folder name.
+- **Count definitions:**
+  - Gains = files that would get the entity and don't have it today.
+  - Conflicts = gains that would also carry another entity of the same family.
+
+| Entity | Gains: labelled / catalog | Conflicting second entity: labelled / catalog |
+|---|---:|---|
+| ACCSO | 0 / 0 | – |
+| ASOF | 180 / 452 | 0 |
+| CIP-I | 167 / 463 | 53 / 85 (CIP-I (GP) 42, CIP-II 27, CIP-III 18) |
+| CIP-I (GP) | 3 / 6 | 3 / 6 (CIP-I 6) |
+| CIP-II | 17 / 24 | 3 / 3 (CIP-III 3) |
+| CSOP | 78 / 276 | 0 |
+| IVY | 0 / 0 | – |
+| MTV-IV (A) | 169 / 358 | 5 / 5 (MTV-I 5) |
+| MTV-IV (Annex) | 114 / 261 | 5 / 14 (MTV-IV (A) 14) |
+| MTV-IV (Annex) (GP) | 98 / 286 | 51 / 96 (MTV-IV (Annex) 87, MTV-IV (A) 72, …) |
+| MTV-IV (B) | 128 / 278 | 13 / 30 (MTV-IV (A) 27, MTV-I 3) |
+| MTV-IV (GP) | 301 / 815 | 191 / 383 (MTV-IV (A) 250, MTV-IV (Annex) (GP) 114, …) |
+| MTV-V (A) | 112 / 256 | 5 / 5 (MTV-I 5) |
+| MTV-V (B) | 104 / 249 | 16 / 35 (MTV-V (A) 34, MTV-I 1) |
+| MTV-V (GP) | 142 / 388 | 82 / 159 (MTV-V (A) 113, MTV-V (MTEF) 46, MTV-V (B) 41, MTV-I 2) |
+| MTV-V (MTEF) | 143 / 282 | 8 / 15 (MTV-V (A) 14, MTV-I 1) |
+| MTV-VI | 1 / 2 | 0 |
+| NL-I | 268 / 948 | 0 |
+| NL-II | 114 / 182 | 1 / 3 (NL-I 3) |
+| TM | 0 / 0 | – |
+| X | 4 / 9 | 0 |
+
+- **Reading the conflicts:**
+  - For a GP the "conflict" is often right: a GP's K-1 from its fund sits in the fund's folder and names both.
+  - For a fund it is worth a look. CIP-I would add itself to 27 CIP-II and 18 CIP-III files: folder names like "Cyber Innovation Partners – Fund II".
+  - My suggestion: approve the fund rules with no conflicts (ASOF, CSOP, NL-I, NL-II, X, MTV-VI), and send the GP and CIP-I rules to Review first.
+- **Not mapped** (no catalog entity, or the mapping isn't clear): ASOF (GP), Allegis X (GP), Attotude (SPV), CIP-II (GP), Fundam (SPV), Lightship I / II (SPV), MTV-III (PF), MTV-III (PF) (GP), NL-I (GP), NL-II (GP). MTV-III (PF) may be MTV-III or MTV-III (MTEF); Ryan to say.
+
+**Review screenshots** (local Worker on the throwaway branch, `?mask=1`):
+- Before each shot, a check confirmed 0 preview frames and every file name masked.
+- Shots:
+  1. Queue with the Status-unknown card.
+  2. Status-unknown lane with the Status form (disabled until publish).
+  3. Edit labels in the Review form.
+  4. Stage-unknown lane with the Execution form.
+- They are kept outside the repo (`claude-chrome-screenshots-*`). The Worker and proxy were stopped afterwards.
+- **Note:** a `workerd` started on 2026-11-17 from `C:\DriveCatalog\app` (not this worktree; likely the hotfix tab's local Worker) was holding port 8787. It was left running, and this run used 8797 / 8798.
+- **Small layout defect:** the Review side panel scrolls sideways (content 582 px in a 363 px panel). It's display-only, and a fix is pending.
+
+### Part 2 release steps (run on Ryan's go-ahead, in this order)
+0. **Final coder + CISO review** of everything since the last Part 2 review:
+   - the rule rounds 2–4;
+   - the Review screen;
+   - the `build_documents` restatement;
+   - the label publish code;
+   - the re-sync `_unwritable` fix.
+   - Fix the findings.
+1. **Check main** hasn't moved from `03d430c` (rebase and re-test if it has): vitest 91, pipeline 30, `tsc`.
+2. **Restore point:** a Neon branch `pre-catwo02-p2` from main.
+3. **Migration 004 on main** (as the DB owner).
+   - Its guards stop the run if a rule ID is taken or the Schwab change doesn't land.
+   - Afterwards check `security_barrier` on `v_find` / `v_find_x` / `v_review_queue` and the `catalog_app` grants.
+4. **Derive on main:** `drive_crawl.py derive` (about 3 min), then `pipeline/apply_derive_wo02.py --apply`. On the branch apply changed the kind of **6,446** documents and set Parties / Status.
+5. **Read-back on main:** `label_sync_wo02.py readback --apply`. It seeds `ops.label_state` from the live labels; the re-sync refuses to run without it.
+6. **Labels:**
+   - `labels_setup_wo02.py --check`, then `--create-drafts --release`.
+   - Ryan looks at the drafts in Admin console → Label manager.
+   - `--publish --release`.
+   - Commit `src/lib/labels_schema.json`.
+   - **Order inside this step:** Parties (new) and Status & Execution (+ Status, Issued date) and Allegis Document (+ 2 Kind choices, CYBER-II disabled) publish together, **before** the re-sync, so the two operating-agreement kinds can be written.
+7. **Deploy:** merge `cat-wo-02-p2` into main, push, `opennextjs-cloudflare deploy`.
+   - Smoke test Find, the Review queue (lanes, Stage / Status form, Edit labels) and the Labels panel. Status, Issued date and Parties should now be editable.
+8. **Re-sync:** `label_sync_wo02.py resync`, first without `--apply`.
+   - Compare with the plan below; then `--apply`. It reports read / person-confirmed / re-synced / skipped as person-owned / errors.
+   - **The plan** (`scripts/resync_plan_wo02.py`, branch, from the stored read-back) is **16,132** labelled files:
+
+     | Field | Labels written |
+     |---|---:|
+     | Status | 7,252 |
+     | Kind | 6,686 (6,070 blank → kind; 616 kind changes) |
+     | Receiving entity | 4,707 |
+     | Issuing entity | 4,065 |
+     | Issuer | 1,045 (Schwab → bank) |
+     | Fiscal year | 472 (the FY folder rules) |
+     | Entity | 316 (CIP-II) |
+     | Period | 181 |
+     | Stage | 16 |
+
+   - Person-owned values are skipped and counted; the branch snapshot has none, so main's read-back decides.
+   - Before the publish, the same plan writes 7,763 files and holds back the 123 operating-agreement kinds, leaving them as they are.
+9. **Hooks:** wire `readback()` into `drive_crawl.py incremental` and `resync()` into `labels_sync.py --resync` (outside the repo).
+10. **Post-checks:** Review counts, no-kind count, a sample of re-synced files. Then update the handoff and post `CATWO02 RELEASED <sha>`.
 
 **P-K1 · management company K-1s** (the "Mgmt Co / … Investments in …" folders, 407+ K-1s). The files carry no single manco entity, so K1-R1 sets nothing. If Ryan names the management company those folders belong to, a rule can set receiving = that manco and issuing = the fund on the file.
 

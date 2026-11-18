@@ -120,15 +120,22 @@ def expected(r, schema):
         "issuing_entity": r.get("issuing_entity"), "receiving_entities": sorted(r.get("receiving_entities") or []),
         "tier": r.get("handling"), "contains": ["lp_pii"] if r.get("pii_lp") else [],
     }
-    # a choice that does not exist on the published label cannot be written: the machine writes nothing for it
+    # a choice that does not exist on the published label cannot be written: the machine writes nothing for it.
+    # "_unwritable" lists those fields so the RE-SYNC leaves them alone instead of clearing the live value
+    # (e.g. kind operating_agreement before its choice is published must not unset Kind = LPA on the file).
+    unwritable = []
     for f, (lk, fk, kind) in FIELDS.items():
         if not schema.has(f):
             e[f] = [] if kind == "many" else None
             continue
         ch = schema.S[lk]["fields"][fk].get("choices")
         if ch is not None:
-            if kind == "one" and e[f] is not None and e[f] not in ch: e[f] = None
-            if kind == "many": e[f] = sorted(x for x in e[f] if x in ch)
+            if kind == "one" and e[f] is not None and e[f] not in ch: e[f] = None; unwritable.append(f)
+            if kind == "many":
+                keep = sorted(x for x in e[f] if x in ch)
+                if len(keep) != len(e[f]): unwritable.append(f)
+                e[f] = keep
+    e["_unwritable"] = unwritable
     return e
 
 

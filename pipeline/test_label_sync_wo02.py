@@ -76,6 +76,12 @@ check("G-R5 first read-back: a stale catalog value is not 'person-owned'", ls.pe
 w, s = ls.plan_resync(cl.expected(row(kind="receipt"), schema), live_from(machine), seed, [], FIELDS)
 check("G-R6 ... and the re-sync updates it", w == ["kind"] and s == [], f"write={w} skip={s}")
 
+# ---- a kind the label cannot hold yet (choice not published, e.g. operating_agreement) is left alone, never cleared
+e_new = cl.expected(row(kind="operating_agreement"), schema)
+w, s = ls.plan_resync(e_new, live_from(machine), machine, [], FIELDS)
+check("G-S9 an unpublished choice is not re-synced as a blank (Kind on the file stays as it is)",
+      "kind" in e_new["_unwritable"] and "kind" not in w and "kind" not in s, f"write={w} skip={s}")
+
 # ---- Handling is never in a re-sync write
 mods = ls.mods_for(["kind", "tier", "contains"], now, schema)
 ids = {m["labelId"] for m in mods}

@@ -96,7 +96,116 @@ def main():
         print(f"Kind: + {len(NEW_KIND_CHOICES)} choices at publish ({', '.join(NEW_KIND_CHOICES)}); "
               f"Entity: disable {', '.join(DISABLE_ENTITY_CHOICES)} (disable, not delete)")
         print("--check: nothing created, nothing published."); return
-    raise SystemExit("--create-drafts / --publish are CAT-WO-02 Part 2 release steps; run them only on Ryan's go-ahead (handoff R-steps).")
+    if "--release" not in sys.argv:
+        raise SystemExit("--create-drafts / --publish are CAT-WO-02 Part 2 release steps: add --release, and run them only "
+                         "on Ryan's go-ahead (handoff, Part 2 release steps).")
+    if mode == "--create-drafts":
+        create_drafts(svc, by_title, parties, exec_new)
+    else:
+        publish(svc, parties)
+
+
+# ---------------------------------------------------------------- release steps (run only with --release)
+def _base(lab):
+    return lab["name"].split("@")[0]          # always act on the latest revision
+
+
+def _labels(svc):
+    out, tok = {}, None
+    while True:
+        r = svc.labels().list(useAdminAccess=True, publishedOnly=False, view="LABEL_VIEW_FULL", pageToken=tok).execute()
+        for l in r.get("labels", []): out[l["properties"]["title"]] = l
+        tok = r.get("nextPageToken")
+        if not tok: return out
+
+
+def _field(lab, display):
+    return next((f for f in lab.get("fields", []) if f["properties"]["displayName"] == display), None)
+
+
+def create_drafts(svc, by_title, parties, exec_new):
+    """Drafts / unpublished deltas only - nothing is visible to users until --publish. Idempotent: re-running skips
+    what is already there."""
+    doc = by_title["Allegis Document"]
+    # 1. L11 Parties: a new label as a DRAFT, with the same permissions as Allegis Document (appliers can use it)
+    if "Parties" not in by_title:
+        body = {"labelType": "ADMIN", "properties": {"title": "Parties", "description":
+                "Who issued the document and who received it (codes only: entity / portco codes, LP, EXTERNAL). CAT-WO-02 R-021."},
+                "fields": [spec for spec, _ in parties.values()]}
+        lab = svc.labels().create(body=body, useAdminAccess=True).execute()
+        perms = svc.labels().permissions().list(parent=_base(doc), useAdminAccess=True).execute().get("labelPermissions", [])
+        for pm in perms:
+            body = {k: pm[k] for k in ("email", "group", "audience", "person") if pm.get(k)}
+            body["role"] = pm["role"]
+            svc.labels().permissions().create(parent=_base(lab), body=body, useAdminAccess=True).execute()
+        print(f"+ Parties: created as DRAFT, {len(perms)} permission(s) copied from Allegis Document")
+    else:
+        print("= Parties: exists - not changed")
+    # 2. Execution -> "Status & Execution": + Status, + Issued date (unpublished delta)
+    ex = by_title.get("Execution") or by_title[NEW_EXEC_TITLE]
+    reqs = []
+    if ex["properties"]["title"] != NEW_EXEC_TITLE:
+        reqs.append({"updateLabel": {"properties": {"title": NEW_EXEC_TITLE}, "updateMask": "title"}})
+    for spec, _ in exec_new.values():
+        if not _field(ex, spec["properties"]["displayName"]):
+            reqs.append({"createField": {"field": spec}})
+    if reqs:
+        svc.labels().delta(name=_base(ex), body={"useAdminAccess": True, "requests": reqs}).execute()
+    print(f"~ {NEW_EXEC_TITLE}: {len(reqs)} unpublished change(s)")
+    # 3. Allegis Document: + 2 Kind choices (RK2), Entity choice CYBER-II DISABLED (never deleted)
+    reqs = []
+    kind_f, ent_f = _field(doc, "Kind"), _field(doc, "Entity")
+    have = {c["properties"]["displayName"]: c for c in kind_f.get("selectionOptions", {}).get("choices", [])}
+    for code, disp in NEW_KIND_CHOICES.items():
+        if disp not in have:
+            reqs.append({"createSelectionChoice": {"fieldId": kind_f["id"], "choice": {"properties": {"displayName": disp}}}})
+    for c in ent_f.get("selectionOptions", {}).get("choices", []):
+        if c["properties"]["displayName"] in DISABLE_ENTITY_CHOICES and not c.get("lifecycle", {}).get("disabledPolicy"):
+            reqs.append({"disableSelectionChoice": {"fieldId": ent_f["id"], "id": c["id"],
+                                                    "disabledPolicy": {"hideInSearch": False, "showInApply": False}, "updateMask": "*"}})
+    if reqs:
+        svc.labels().delta(name=_base(doc), body={"useAdminAccess": True, "requests": reqs}).execute()
+    print(f"~ Allegis Document: {len(reqs)} unpublished change(s) (Kind +{len(NEW_KIND_CHOICES)}, Entity disable {DISABLE_ENTITY_CHOICES})")
+    print("Drafts only. Review in Admin console > Label manager, then run --publish --release.")
+
+
+def publish(svc, parties):
+    """Publish Parties, Status & Execution and Allegis Document, then write their ids into src/lib/labels_schema.json
+    (the app reads it at build time: Parties / Status / Issued date become editable and the re-sync writes them)."""
+    labs = _labels(svc)
+    for title in ("Parties", NEW_EXEC_TITLE, "Allegis Document"):
+        lab = labs[title]
+        if lab.get("lifecycle", {}).get("state") == "PUBLISHED" and not lab.get("lifecycle", {}).get("hasUnpublishedChanges"):
+            print(f"= {title}: nothing to publish"); continue
+        svc.labels().publish(name=_base(lab), body={"useAdminAccess": True}).execute()
+        print(f"^ {title}: published")
+    labs = _labels(svc)
+    path = os.path.join(HERE, "..", "src", "lib", "labels_schema.json")
+    schema = json.load(open(path, encoding="utf-8"))
+
+    def choices(f, names):
+        g = {c["properties"]["displayName"]: c["id"] for c in f.get("selectionOptions", {}).get("choices", [])}
+        return {code: g[disp] for code, disp in names.items() if disp in g}
+
+    P = labs["Parties"]
+    schema["parties"] = {"label_id": P["id"], "title": "Parties", "fields": {}}
+    for key, (spec, names) in parties.items():   # names = the design's code -> display map (entities, portcos, LP, EXTERNAL)
+        f = _field(P, spec["properties"]["displayName"])
+        ch = choices(f, names)
+        missing = sorted(set(names) - set(ch))
+        if missing: raise SystemExit(f"Parties.{key}: {len(missing)} designed choice(s) not on the published label - stop")
+        schema["parties"]["fields"][key] = {"field_id": f["id"], "type": "selectionOptions", "choices": ch}
+    E = labs[NEW_EXEC_TITLE]
+    schema["exec"]["title"] = NEW_EXEC_TITLE
+    st = _field(E, "Status")
+    schema["exec"]["fields"]["status"] = {"field_id": st["id"], "type": "selectionOptions", "choices": choices(st, STATUS)}
+    schema["exec"]["fields"]["issued_date"] = {"field_id": _field(E, "Issued date")["id"], "type": "dateOptions"}
+    D = labs["Allegis Document"]
+    schema["doc"]["fields"]["kind"]["choices"].update(choices(_field(D, "Kind"), NEW_KIND_CHOICES))
+    for code in DISABLE_ENTITY_CHOICES:
+        schema["doc"]["fields"]["entity"]["choices"].pop(code, None)   # disabled: the app never offers or writes it
+    json.dump(schema, open(path, "w", encoding="utf-8"), indent=1)
+    print(f"Wrote {os.path.normpath(path)} - review the diff (Parties choice codes) and commit it before the deploy.")
 
 
 if __name__ == "__main__":

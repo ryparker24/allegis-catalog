@@ -197,6 +197,35 @@ DELETE FROM ref.entity_alias WHERE alias = 'CYBER-II' AND entity_code = 'CYBER-I
 UPDATE ref.entity SET active = false,
        notes = concat_ws(' · ', nullif(notes, ''), 'CAT-WO-02: retired, not a real entity; AllegisCyber II = CIP-II')
 WHERE entity_code = 'CYBER-II' AND active IS DISTINCT FROM false;
+
+-- (Ryan, round 4) spelled-out "Cyber Innovation Partners II" (name or folder) -> CIP-II. ENT-002 only knows "CIP II".
+--     \y after II keeps "Cyber Innovation Partners III" out. Same priority / multi as ENT-002.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM ops.decomposition_rule WHERE rule_id IN ('ENT-020', 'ENT-020P') AND value <> 'CIP-II') THEN
+        RAISE EXCEPTION 'ENT-020 / ENT-020P already used by a different rule: pick free rule ids';
+    END IF;
+END $$;
+INSERT INTO ops.decomposition_rule (rule_id, version, field, applies_to, pattern, value, priority, active, notes, multi, provisional)
+SELECT CASE r.applies_to WHEN 'name' THEN 'ENT-020' ELSE 'ENT-020P' END, 1, r.field, r.applies_to,
+       '(?i)\yCyber Innovation Partners,? II\y', 'CIP-II', r.priority, true,
+       'CAT-WO-02: spelled-out Cyber Innovation Partners II (Ryan)', r.multi, false
+FROM ops.decomposition_rule r WHERE r.rule_id IN ('ENT-002', 'ENT-002P') AND r.version = 1
+ON CONFLICT (rule_id, version) DO NOTHING;
+
+-- (Ryan, round 4) Schwab joins the catalog's bank / financial-institution list (ISS-004 name, ISS-004P folder;
+--     issuer = bank). NK03 reads ISS-004P's names, so the Schwab statement folders become bank-statement folders.
+INSERT INTO ops.decomposition_rule (rule_id, version, field, applies_to, pattern, value, priority, active, notes, multi, provisional)
+SELECT rule_id, 2, field, applies_to, replace(pattern, '|US Bank)', '|US Bank|Schwab)'), value, priority, true,
+       'CAT-WO-02: + Schwab (Ryan)', multi, provisional
+FROM ops.decomposition_rule WHERE rule_id IN ('ISS-004', 'ISS-004P') AND version = 1 AND pattern LIKE '%|US Bank)%'
+ON CONFLICT (rule_id, version) DO NOTHING;
+DO $$
+BEGIN
+    IF (SELECT count(*) FROM ops.decomposition_rule WHERE rule_id IN ('ISS-004', 'ISS-004P') AND version = 2 AND pattern LIKE '%Schwab%') <> 2 THEN
+        RAISE EXCEPTION 'ISS-004 / ISS-004P v2 with Schwab not in place: check the v1 patterns';
+    END IF;
+END $$;
 COMMIT;
 
 -- ---------------------------------------------------------------- item 6 / item 8 · Review queue (after the CAT-WO-01.1 rebase)
@@ -299,4 +328,93 @@ CREATE OR REPLACE VIEW app.v_review_counts AS
     ( SELECT count(DISTINCT r.file_id)::integer FROM app.review_event r JOIN app.v_find v USING (file_id)
        WHERE r.status = ANY (ARRAY['confirmed'::text, 'wrong'::text])) AS reviewed_total,
     ( SELECT count(*)::integer FROM app.v_review_queue WHERE queue_reason = 'status_unknown'::text) AS status_unknown;
+COMMIT;
+
+-- ---------------------------------------------------------------- the same tie-break in the document roll-up
+-- cat.v_file_best got its final key (above), but ops.build_documents rolls file signals up to the DOCUMENT with its own
+-- DISTINCT ON whose ORDER BY ended at (file_role = 'primary'): two tied rules (e.g. KND-019 invoice vs KND-022
+-- wire_confirmation, both 30; KND-007 lpa vs KNX-002 ppm, both 20) still gave a different document kind / fiscal year /
+-- issuer per run. Found on the branch when the re-sync diff moved by 3 files between two derives with no rule change.
+-- The live definition with ONE change: the final keys s.rule_id, s.value, s.file_id.
+BEGIN;
+CREATE OR REPLACE FUNCTION ops.build_documents()
+ RETURNS TABLE(step text, n bigint)
+ LANGUAGE plpgsql
+AS $function$
+DECLARE c bigint;
+BEGIN
+  -- 1. group files: same md5 = one document; primary = shared-drive, non-Revver, newest
+  TRUNCATE cat.file_group;
+  INSERT INTO cat.file_group (file_id, group_key, is_primary)
+  SELECT file_id, gk, rn = 1 FROM (
+    SELECT f.file_id, coalesce('md5:'||f.md5, 'file:'||f.file_id) gk,
+           row_number() OVER (PARTITION BY coalesce('md5:'||f.md5, 'file:'||f.file_id)
+             ORDER BY (f.drive_id IS NOT NULL) DESC, (f.source_system <> 'revver') DESC, f.modified_time DESC NULLS LAST, f.file_id) rn
+    FROM cat.file f WHERE f.removed_run IS NULL AND NOT f.noise_flag AND f.handling <> 'secret') x;
+  GET DIAGNOSTICS c = ROW_COUNT; step := 'files grouped'; n := c; RETURN NEXT;
+
+  INSERT INTO cat.document (group_key, title_auto, rules_version)
+  SELECT g.group_key, f.name, 'rules_v2' FROM cat.file_group g JOIN cat.file f USING (file_id) WHERE g.is_primary
+  ON CONFLICT (group_key) DO UPDATE SET title_auto = EXCLUDED.title_auto, updated_at = now();
+  GET DIAGNOSTICS c = ROW_COUNT; step := 'documents upserted'; n := c; RETURN NEXT;
+
+  DELETE FROM cat.file_document WHERE source = 'auto';
+  INSERT INTO cat.file_document (file_id, document_id, file_role, source)
+  SELECT g.file_id, d.document_id, CASE WHEN g.is_primary THEN 'primary' ELSE 'copy' END, 'auto'
+  FROM cat.file_group g JOIN cat.document d USING (group_key) ON CONFLICT DO NOTHING;
+  GET DIAGNOSTICS c = ROW_COUNT; step := 'file links'; n := c; RETURN NEXT;
+
+  -- 2. best single value per document across all its files
+  TRUNCATE cat.doc_best;
+  INSERT INTO cat.doc_best
+  SELECT DISTINCT ON (fd.document_id, s.field) fd.document_id, s.field, s.value, s.rule_id, s.rule_version, s.source, s.file_id
+  FROM cat.file_signal s JOIN cat.file_document fd ON fd.file_id = s.file_id
+  JOIN ops.decomposition_rule r ON r.rule_id = s.rule_id AND r.version = s.rule_version
+  WHERE NOT r.multi AND s.field IN ('kind','workstream','fiscal_year','fiscal_quarter','period_type','tax_year','issuer','confidentiality','pii_lp_flag','draft_version_no')
+  ORDER BY fd.document_id, s.field, s.priority, s.distance, (s.source='name') DESC, (fd.file_role='primary') DESC,
+           s.rule_id, s.value, s.file_id;   -- CAT-WO-02: final keys, same fix as cat.v_file_best (ties were a coin-flip per run)
+
+  UPDATE cat.document d SET kind_auto = p.kind, workstream_auto = p.workstream, fiscal_year_auto = p.fy, fiscal_quarter_auto = p.fq,
+         period_type_auto = p.pt, tax_year_auto = p.ty, issuer_auto = p.iss, confidentiality_auto = p.conf,
+         pii_lp_flag_auto = p.pii, draft_version_no_auto = p.dv, updated_at = now()
+  FROM (SELECT document_id, max(value) FILTER (WHERE field='kind') kind, max(value) FILTER (WHERE field='workstream') workstream,
+               max(value) FILTER (WHERE field='fiscal_year')::int fy, max(value) FILTER (WHERE field='fiscal_quarter')::smallint fq,
+               max(value) FILTER (WHERE field='period_type') pt, max(value) FILTER (WHERE field='tax_year')::int ty,
+               max(value) FILTER (WHERE field='issuer') iss, max(value) FILTER (WHERE field='confidentiality') conf,
+               (max(value) FILTER (WHERE field='pii_lp_flag'))::boolean pii, max(value) FILTER (WHERE field='draft_version_no')::int dv
+        FROM cat.doc_best GROUP BY document_id) p
+  WHERE p.document_id = d.document_id;
+  GET DIAGNOSTICS c = ROW_COUNT; step := 'documents derived'; n := c; RETURN NEXT;
+
+  -- 3. execution stage (R-005): tokens across all copies; non-agreement formats excluded; Word w/o tokens = draft (inferred)
+  CREATE TEMP TABLE IF NOT EXISTS _pf ON COMMIT DROP AS
+    SELECT fd.document_id, f.file_type_family fam FROM cat.file_document fd JOIN cat.file f USING (file_id) WHERE fd.file_role = 'primary';
+  CREATE TEMP TABLE IF NOT EXISTS _tok ON COMMIT DROP AS
+    SELECT fd.document_id, array_agg(DISTINCT s.value) toks FROM cat.file_signal s JOIN cat.file_document fd ON fd.file_id = s.file_id
+    WHERE s.field = 'exec_token' GROUP BY fd.document_id;
+
+  UPDATE cat.document d SET
+    kind_auto = CASE WHEN pf.fam = 'email' AND d.kind_auto IN (SELECT code FROM ref.vocab WHERE list_name='executable_kind') THEN 'correspondence' ELSE d.kind_auto END,
+    requires_execution_auto = (d.kind_auto IN (SELECT code FROM ref.vocab WHERE list_name='executable_kind') AND pf.fam IN ('pdf','doc','image')),
+    execution_stage_auto = CASE
+      WHEN NOT (d.kind_auto IN (SELECT code FROM ref.vocab WHERE list_name='executable_kind') AND pf.fam IN ('pdf','doc','image')) OR d.kind_auto IS NULL THEN 'n_a'
+      WHEN t.toks && ARRAY['fully_executed','docusign'] THEN 'fully_executed'
+      WHEN 'executed' = ANY(t.toks) AND NOT ('unsigned' = ANY(t.toks)) THEN 'fully_executed'
+      WHEN 'signature_page' = ANY(t.toks) THEN 'partially_executed'
+      WHEN 'draft' = ANY(t.toks) OR d.draft_version_no_auto IS NOT NULL THEN 'draft'
+      WHEN t.toks && ARRAY['final','unsigned'] THEN 'final_unexecuted'
+      WHEN pf.fam = 'doc' THEN 'draft'
+      ELSE 'unknown' END
+  FROM _pf pf LEFT JOIN _tok t ON t.document_id = pf.document_id
+  WHERE pf.document_id = d.document_id;
+
+  DELETE FROM cat.derivation WHERE field = 'execution_stage';
+  INSERT INTO cat.derivation (document_id, field, rule_id, rule_version)
+  SELECT d.document_id, 'execution_stage',
+         CASE WHEN d.execution_stage_auto = 'draft' AND pf.fam = 'doc' AND t.toks IS NULL AND d.draft_version_no_auto IS NULL
+              THEN 'STAGE-INF-WORD' ELSE 'STAGE-TOKENS' END, 1
+  FROM cat.document d JOIN _pf pf USING (document_id) LEFT JOIN _tok t USING (document_id)
+  WHERE d.requires_execution_auto;
+  GET DIAGNOSTICS c = ROW_COUNT; step := 'executable documents staged'; n := c; RETURN NEXT;
+END $function$;
 COMMIT;

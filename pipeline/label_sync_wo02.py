@@ -46,7 +46,8 @@ def plan_resync(expected, live, machine, prior_person, schema_fields):
     """-> (fields to write, fields skipped because a person owns them). Only fields where the catalog differs from Drive."""
     owned = set(prior_person) | set(person_owned(live, machine, schema_fields))
     fields = [f for f in cl.RESYNC_FIELDS if f in schema_fields]
-    differs = cl.diff(expected, live, fields)
+    # a value the label cannot hold yet (choice not published) is never written - and never written as a blank
+    differs = [f for f in cl.diff(expected, live, fields) if f not in expected.get("_unwritable", ())]
     return [f for f in differs if f not in owned], [f for f in differs if f in owned]
 
 
