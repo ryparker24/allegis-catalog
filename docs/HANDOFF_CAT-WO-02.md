@@ -4,7 +4,8 @@
 
 **Status (draft, kept current):**
 - **Part 1** is built and reviewed on branch `cat-wo-02` (`f408e52`). It is held for the CAT-WO-01.1 hotfix, per Ryan: it must ship with the hotfix commit, and the Review screen is built on top of the fix.
-- **Part 2** is built on `cat-wo-02-p2` against the throwaway branch only. Nothing is published, nothing is deployed, and the only Drive writes were the pilot-file guard tests, each restored.
+- **Part 1** released 2026-11-18 (`CATWO02-P1 RELEASED 03d430c`).
+- **Part 2** released 2026-11-18 on main (`3b18eb8`, Worker version `2323c7c1-d781-48d1-82c0-f83e24c04ca8`). See "Part 2 release record" below.
 
 Throwaway Neon branch: `catwo02-test-throwaway` = `br-red-band-bd2d79yz` (endpoint `ep-billowing-truth-bdj6gzs7`) on `curly-sunset-06555843`, taken from main at 2026-11-17 22:58 UTC. Main was never written.
 
@@ -79,7 +80,7 @@ Throwaway Neon branch: `catwo02-test-throwaway` = `br-red-band-bd2d79yz` (endpoi
 
 ---
 
-## Part 2 · labels and data (items 0, 5–9) — built on `cat-wo-02-p2`, not released
+## Part 2 · labels and data (items 0, 5–9) — built on `cat-wo-02-p2`, released 2026-11-18
 
 ### Item 0 · measurements (read-only; counts only; branch = main as of 22:58 UTC)
 **0.1 K-1 parties.** 7,216 labelled K-1s.
@@ -482,6 +483,56 @@ Measured with `scripts/measure_wo02_item9d.py`, run after 004 + `derive` and bef
 - They are kept outside the repo (`claude-chrome-screenshots-*`). The Worker and proxy were stopped afterwards.
 - **Note:** a `workerd` started on 2026-11-17 from `C:\DriveCatalog\app` (not this worktree; likely the hotfix tab's local Worker) was holding port 8787. It was left running, and this run used 8797 / 8798.
 - **Small layout defect:** the Review side panel scrolls sideways (content 582 px in a 363 px panel). It's display-only, and a fix is pending.
+
+### Part 2 release record (2026-11-18, Ryan's round-5 go-ahead)
+| Step | Result |
+|---|---|
+| 0 Review | Coder and CISO findings fixed (`7e133b8`, `359fb47`) |
+| 1 Main | Still at `03d430c`; vitest 92/92, pipeline 31/31 |
+| 2 Restore point | `pre-catwo02-p2` = `br-rapid-snow-bd9g9pqq` |
+| 3 Migration 004 | Applied on main; 26/26 read-only checks pass |
+| 4 Derive + apply | Kind changed on 6,468 documents; execution flag cleared on 26; issuer = bank on 1,324 (Schwab PDFs) |
+| 5 Read-back | 46,259 files read; 0 person-owned; 0 errors |
+| 6 Labels | Ryan published Parties, Status & Execution and Allegis Document (+2 Kind choices, CYBER-II disabled); Parties turned on for Drive; Ryan-only permission check passed; IDs in `src/lib/labels_schema.json` (`3b18eb8`) |
+| 7 Deploy | `origin/main` = `3b18eb8`; Worker version `2323c7c1-d781-48d1-82c0-f83e24c04ca8`; smoke tests OK |
+| 8 Re-sync | Dry run = plan; apply run `resync_20261118_120724` (19:07–20:42 UTC) — see below |
+| 9 Hooks | `drive_crawl.py` runs `wo02_after_derive` after every derive and `wo02_readback` after incremental; `labels_sync.py --resync [--apply]` (outside the repo; backups `*.pre-catwo02-p2.bak`) |
+| 10 Post-checks | Below |
+
+**Re-sync applied** (read 46,259; person-confirmed 0; skipped as person-owned 0; errors 0; Entity held for Review 1). The run wrote the same numbers as the dry run:
+
+| Field | Labels written |
+|---|---:|
+| Status | 7,251 |
+| Kind | 6,686 |
+| Receiving entity | 4,716 |
+| Issuing entity | 4,074 |
+| Issuer | 1,010 |
+| Entity | 960 (+1 held) |
+| Fiscal year | 472 |
+| Period | 181 |
+| Stage | 31 |
+| **Files** | **16,643** |
+
+`modifiedTime` was unchanged on all 666 sampled files.
+
+**Post-checks (main, read-only):**
+- `ops.label_state` shows 16,643 files written in the run.
+- A live dry-run re-sync on a random sample of 100 of those files (seed 20261118) read 100 and found 0 writes pending and 0 errors.
+- Review counts: open 40,163; no kind 12,347 (= files without a kind in `v_find`, of 46,259); status unknown 27,172; low-confidence executed 327; stage unknown 317; reviewed 0.
+- `check_main_readonly.py`: 26/26.
+
+**For Review:** the 3 NL-II legal-name conflicts: `1F0m7YSai1tK9c6UpISVVXtK5nSgCxEap`, `1qdkUyOzksns8Jffw7SZjYpEy47_lQ_vq` (labelled; Entity held through `C:\DriveCatalogesync_hold_entities.txt`) and `1sDS3RTq8nqqj-0VGK2czjfbKb5F8V4DI`.
+
+**Follow-ups:**
+- The Review side panel scrolls sideways.
+- MTV-III (PF) legal-name rule: at the CAT-WO-03 build.
+- CIP-I and all GP legal-name rules are held.
+- NL legal-name spacing gap.
+- Queue counts are global.
+- P-K1: the management company K-1s.
+- `CATALOG_APP_DIR` (Ryan to decide): the hooks import `pipeline/` from `C:\DriveCatalogpp` by default. That checkout is on the CAT-WO-03 working branch (which contains this release), not main.
+- The stray Worker on 8787 (`C:\DriveCatalogpp`) is Ryan's to stop.
 
 ### Part 2 release steps (run on Ryan's go-ahead, in this order)
 0. **Final coder + CISO review** of everything since the last Part 2 review:
