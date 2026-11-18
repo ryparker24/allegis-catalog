@@ -35,6 +35,32 @@
    - Review with the Match subject lane (1,229);
    - the Subject form (candidate code, "none", roster picker, staff search).
    - Afterwards the Worker and proxy were stopped, `.dev.vars` and the dev secret were deleted, and the ports were confirmed free.
+9. **Ryan published the labels and accepted defaults 1, 2 and 4.** Directory consent (3) is later; staff matching stays out of the nightly run.
+   - `--read-published --release` → `labels_schema.json`:
+     - Parties: `subject_codes` and `subject_person` fields.
+     - Handling Contains: `personnel`.
+     - +11 choices on each of Entity, Issuing and Receiving.
+   - G-L1 now tests both the pre-publish plan and the published state; pipeline tests 36/36.
+   - The first test branch `br-shiny-bar-bdbrp0e1` was deleted (Ryan's instruction).
+10. **Deploy:** main fast-forwarded to `14e0f6f` and pushed. Worker version `cf1083df-cf6c-4fca-b636-713b31a13717`.
+    - Smoke test: unauthenticated requests to every new route → 302 to Cloudflare Access.
+    - Smoke test, signed in (masked; read-only, nothing saved):
+      - all six checklists return main's counts;
+      - Gaps returns 36 cells; an unknown rule returns 400;
+      - Review's Match subject lane = 1,229 with subject columns;
+      - Find rows carry `subject_codes` / `subject_person`.
+    - `C:\DriveCatalog\app-main` (the nightly's `CATALOG_APP_DIR`) is detached at `14e0f6f`.
+11. **Re-sync dry run** (`labels_sync.py --resync`, main, nothing written):
+    - read 46,259 · person-owned 0 · errors 0 · Entity held 1 (the Part 2 NL-II hold);
+    - **would re-sync 4,595 files**: Subject code(s) 2,300 · Handling raise 3 · Issuing entity 2,449 · Receiving entities 3,071.
+    - **Subject code(s) 2,300** (plan ≈2,170): higher because the K1-R2 fix lets more K-1s match on the member's name.
+    - **Handling 3:** the personnel documents (Restricted + Personnel info; only ever raises).
+    - **Parties unsets (the K1-R2 fix):** Issuing 808 and Receiving 1,430 labelled files, from the 841 crowded documents (several labelled copies each).
+    - **Parties sets 1,641 (Issuing and Receiving): Part 2's own K1-R3 rule catching up, not a WO-03 change.**
+      - Main's stored parties dated from Part 2's derive run, made before its final commits. The released code was first run on main in this release.
+      - Proof, on the restore branch `pre-catwo03` (read-only endpoint `ep-rapid-art-bdbrjxhk`): the released code with the WO-03 fix switched off gives 4,458 K1-R3 documents, against 3,120 stored.
+      - The next nightly derive plus re-sync would have made the same writes.
+    - **STOPPED for Ryan before `--apply`.**
 
 ---
 
