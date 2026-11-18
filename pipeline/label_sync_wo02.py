@@ -27,6 +27,7 @@ CONFIRM_COL = {
     "stage": "execution_stage_confirmed", "executed_date": "signed_date_confirmed",
     "status": "status_confirmed", "issued_date": "issued_date_confirmed",
     "issuing_entity": "issuing_entity_confirmed", "receiving_entities": "receiving_entities_confirmed",
+    "subject_codes": "subject_codes_confirmed", "subject_person": "subject_person_confirmed",   # CAT-WO-03 R-026
     # period is split into fiscal_quarter_confirmed / fye_flag_confirmed below
 }
 
@@ -65,10 +66,25 @@ def mods_for(fields, expected, schema):
         if kind == "one": per[lk].append({"fieldId": F["field_id"], "setSelectionValues": [F["choices"][v]]})
         elif kind == "many": per[lk].append({"fieldId": F["field_id"], "setSelectionValues": [F["choices"][c] for c in v]})
         elif kind == "int": per[lk].append({"fieldId": F["field_id"], "setIntegerValues": [str(v)]})
+        elif kind == "codes": per[lk].append({"fieldId": F["field_id"], "setTextValues": [cl.codes_to_text(v)]})   # codes only (expected() filters)
+        elif kind == "user": per[lk].append({"fieldId": F["field_id"], "setUserValues": [v]})
         else:
             y, m, d = (int(x) for x in str(v)[:10].split("-"))
             per[lk].append({"fieldId": F["field_id"], "setDateValues": [{"year": y, "month": m, "day": d}]})
     return [{"labelId": schema.S[lk]["label_id"], "fieldModifications": fm} for lk, fm in per.items()]
+
+
+def handling_mods(raise_, schema):
+    """labelModifications for cl.handling_raise() output (Restricted / + Personnel info). Never anything else on Handling."""
+    if not raise_:
+        return []
+    H = schema.S["handling"]
+    fm = []
+    if raise_.get("tier") == "restricted":
+        fm.append({"fieldId": H["fields"]["tier"]["field_id"], "setSelectionValues": [H["fields"]["tier"]["choices"]["restricted"]]})
+    if raise_.get("contains"):
+        fm.append({"fieldId": H["fields"]["contains"]["field_id"], "setSelectionValues": [H["fields"]["contains"]["choices"][c] for c in raise_["contains"]]})
+    return [{"labelId": H["label_id"], "fieldModifications": fm}] if fm else []
 
 
 # ------------------------------------------------------------------ DB helpers
@@ -143,6 +159,8 @@ def readback(connect, svc, schema, apply=False, ids=None, log=print):
         rep["read"] += 1
         d = schema.decode(L["labelInfo"])
         rep["unknown_choices"] = rep.get("unknown_choices", 0) + d["unknown_choices"]
+        # R-026: text in Subject code(s) that is not a roster code is never stored; the file is counted for a look
+        rep["subject_text_not_codes"] = rep.get("subject_text_not_codes", 0) + (d.get("dropped_subject_text", 0) > 0)
         if not d["has_doc_label"] or d["tier"] == "secret":
             unlabelled.append(fid); return     # secret tier (R-010): out of the app's labelled set, never confirmed
         labelled.append(fid)
@@ -187,7 +205,8 @@ def readback(connect, svc, schema, apply=False, ids=None, log=print):
                 cur.execute("DELETE FROM app.labelled_file WHERE file_id = ANY(%s)", (unlabelled,))
             finish_run(cur, rid, rep)
     log(report_line("readback", rep, apply))
-    log(f"  by field (newly person-confirmed): {rep['by_field']}  · {rep['notes']}")
+    log(f"  by field (newly person-confirmed): {rep['by_field']}  · {rep['notes']}"
+        + (f" · Subject code(s) holding non-code text (dropped, not stored): {rep['subject_text_not_codes']:,} files" if rep.get("subject_text_not_codes") else ""))
     return rep
 
 
@@ -231,6 +250,9 @@ def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.s
         write, skip = plan_resync(e, d, st["machine"], st.get("person_fields") or [], fields)
         if fid in hold_entities and "entities" in write:
             write = [f for f in write if f != "entities"]; held.add(fid)   # a set: the per-batch re-plan calls this again
+        e["_handling_raise"] = cl.handling_raise(e, d, schema)            # CAT-WO-03 R-026 personnel: only ever raises
+        if e["_handling_raise"]:
+            write = write + ["_handling"]
         return write, skip, e
 
     def one(fid, L):
@@ -296,7 +318,8 @@ def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.s
 
         b = svc.new_batch_http_request(callback=cb)
         for i, (fid, write, e) in enumerate(chunk):
-            b.add(svc.files().modifyLabels(fileId=fid, body={"labelModifications": mods_for(write, e, schema)}), request_id=str(i))
+            mods = mods_for([f for f in write if f != "_handling"], e, schema) + (handling_mods(e.get("_handling_raise"), schema) if "_handling" in write else [])
+            b.add(svc.files().modifyLabels(fileId=fid, body={"labelModifications": mods}), request_id=str(i))
         b.execute()
         after = svc.files().get(fileId=smp, fields="modifiedTime", supportsAllDrives=True).execute().get("modifiedTime")
         sampled += 1; changed_mtime += before != after
@@ -304,7 +327,7 @@ def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.s
             for fid, write, e in ok:
                 cur.execute("""INSERT INTO ops.label_state (file_id, machine, machine_at) VALUES (%s, %s::jsonb, now())
                                ON CONFLICT (file_id) DO UPDATE SET machine = coalesce(ops.label_state.machine, '{}'::jsonb) || EXCLUDED.machine, machine_at = now()""",
-                            (fid, json.dumps({f: e.get(f) for f in write}, default=str)))
+                            (fid, json.dumps({f: e.get(f) for f in write if f != "_handling"} | (e.get("_handling_raise") or {}), default=str)))
         conn.commit()
         rep["resynced"] += len(ok)
         if retry:

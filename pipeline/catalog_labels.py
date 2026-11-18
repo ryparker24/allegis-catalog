@@ -30,12 +30,31 @@ FIELDS = {
     "issued_date":        ("exec", "issued_date", "date"),    # R-022 (after publish)
     "issuing_entity":     ("parties", "issuing_entity", "one"),       # R-021 (after publish)
     "receiving_entities": ("parties", "receiving_entities", "many"),  # R-021 (after publish)
+    "subject_codes":      ("parties", "subject_codes", "codes"),      # R-026 (after publish): text field holding roster codes
+    "subject_person":     ("parties", "subject_person", "user"),      # R-026 (after publish): a staff Workspace account
     "tier":               ("handling", "tier", "one"),
     "contains":           ("handling", "contains", "many"),
 }
 # Fields a person may own (Handling never: read-only in the app, and the machine keeps writing it).
 PERSON_FIELDS = ["kind", "entities", "portcos", "fiscal_year", "period", "effective_date", "stage", "executed_date",
-                 "status", "issued_date", "issuing_entity", "receiving_entities"]
+                 "status", "issued_date", "issuing_entity", "receiving_entities", "subject_codes", "subject_person"]
+# R-026: the Subject code(s) text field holds roster codes ONLY. Anything else read from Drive is dropped (never stored).
+import re as _re
+SUBJECT_CODE = _re.compile(r"^(LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?$")
+STAFF_EMAIL = _re.compile(r"^[a-z0-9._%+-]{1,64}@allegiscapital\.com$")
+
+
+def codes_from_text(t):
+    """'LP-0001, LP-0002' -> (['LP-0001','LP-0002'], dropped count). Non-code parts are dropped and counted."""
+    parts = [x.strip() for x in _re.split(r"[,;\s]+", t or "") if x.strip()]
+    ok = sorted({x.upper() for x in parts if SUBJECT_CODE.match(x.upper())})
+    return ok, len(parts) - len([x for x in parts if SUBJECT_CODE.match(x.upper())])
+
+
+def codes_to_text(codes):
+    return ", ".join(sorted(codes or []))
+
+
 RESYNC_FIELDS = PERSON_FIELDS + ["workstream", "issuer"]
 
 
@@ -69,8 +88,8 @@ class Schema:
 
     def decode(self, label_info):
         """labelInfo -> {field: value} plus review_status / reviewed_by_set / has_doc_label."""
-        out = {f: ([] if FIELDS[f][2] == "many" else None) for f in FIELDS}
-        out.update(review_status=None, reviewed_by_set=False, has_doc_label=False, unknown_choices=0)
+        out = {f: ([] if FIELDS[f][2] in ("many", "codes") else None) for f in FIELDS}
+        out.update(review_status=None, reviewed_by_set=False, has_doc_label=False, unknown_choices=0, dropped_subject_text=0)
         for L in (label_info or {}).get("labels", []) or []:
             lk = self.by_label_id.get(L.get("id"))
             if not lk:
@@ -96,6 +115,12 @@ class Schema:
                     elif kind == "many": out[f] = sorted(sel)
                     elif kind == "int": out[f] = int(fv["integer"][0]) if fv.get("integer") else None
                     elif kind == "date": out[f] = (fv.get("dateString") or [None])[0]
+                    elif kind == "codes":
+                        out[f], dropped = codes_from_text(" ".join(fv.get("text") or []))
+                        out["dropped_subject_text"] += dropped
+                    elif kind == "user":
+                        em = ((fv.get("user") or [{}])[0].get("emailAddress") or "").lower()
+                        out[f] = em if STAFF_EMAIL.match(em) else None
         return out
 
 
@@ -118,7 +143,10 @@ def expected(r, schema):
         "executed_date": _iso(r.get("signed")) if exec_on and r.get("stage") == "fully_executed" else None,
         "status": r.get("status"), "issued_date": _iso(r.get("issued_date")),
         "issuing_entity": r.get("issuing_entity"), "receiving_entities": sorted(r.get("receiving_entities") or []),
+        "subject_codes": sorted(c for c in (r.get("subject_codes") or []) if SUBJECT_CODE.match(c)),
+        "subject_person": r.get("subject_person") if STAFF_EMAIL.match(r.get("subject_person") or "") else None,
         "tier": r.get("handling"), "contains": ["lp_pii"] if r.get("pii_lp") else [],
+        "_personnel": bool(r.get("personnel")),
     }
     # a choice that does not exist on the published label cannot be written: the machine writes nothing for it.
     # "_unwritable" lists those fields so the RE-SYNC leaves them alone instead of clearing the live value
@@ -126,7 +154,7 @@ def expected(r, schema):
     unwritable = []
     for f, (lk, fk, kind) in FIELDS.items():
         if not schema.has(f):
-            e[f] = [] if kind == "many" else None
+            e[f] = [] if kind in ("many", "codes") else None
             continue
         ch = schema.S[lk]["fields"][fk].get("choices")
         if ch is not None:
@@ -137,6 +165,22 @@ def expected(r, schema):
                 e[f] = keep
     e["_unwritable"] = unwritable
     return e
+
+
+def handling_raise(e, live, schema):
+    """R-026: a personnel document gets Handling Tier = Restricted and Contains + Personnel info. The machine only ever
+    RAISES Handling: never to secret, never lowers a tier, never removes a Contains choice. -> {field: value} to write."""
+    if not e.get("_personnel") or not schema.has("contains"):
+        return {}
+    ch = schema.S["handling"]["fields"]["contains"].get("choices") or {}
+    if "personnel" not in ch:
+        return {}                                           # the Personnel info choice is not published yet
+    out = {}
+    if live.get("tier") in (None, "normal"):
+        out["tier"] = "restricted"
+    if "personnel" not in (live.get("contains") or []):
+        out["contains"] = sorted(set(live.get("contains") or []) | {"personnel"})
+    return out
 
 
 def norm(v):
@@ -213,6 +257,9 @@ SELECT f.file_id, f.handling, d.document_id,
        coalesce(d.issued_date_confirmed, d.issued_date_auto) AS issued_date,
        coalesce(d.issuing_entity_confirmed, d.issuing_entity_auto) AS issuing_entity,
        coalesce(d.receiving_entities_confirmed, d.receiving_entities_auto) AS receiving_entities,
+       coalesce(d.subject_codes_confirmed, d.subject_codes_auto) AS subject_codes,
+       coalesce(d.subject_person_confirmed, d.subject_person_auto) AS subject_person,
+       d.personnel_auto AS personnel,
        d.updated_at
 FROM cat.file f
 LEFT JOIN cat.file_document fd ON fd.file_id=f.file_id
@@ -226,11 +273,23 @@ CATALOG_SQL_V1 = (CATALOG_SQL
     .replace("coalesce(d.status_confirmed, d.status_auto)", "NULL::text")
     .replace("coalesce(d.issued_date_confirmed, d.issued_date_auto)", "NULL::date")
     .replace("coalesce(d.issuing_entity_confirmed, d.issuing_entity_auto)", "NULL::text")
-    .replace("coalesce(d.receiving_entities_confirmed, d.receiving_entities_auto)", "NULL::text[]"))
+    .replace("coalesce(d.receiving_entities_confirmed, d.receiving_entities_auto)", "NULL::text[]")
+    .replace("coalesce(d.subject_codes_confirmed, d.subject_codes_auto)", "NULL::text[]")
+    .replace("coalesce(d.subject_person_confirmed, d.subject_person_auto)", "NULL::text")
+    .replace("d.personnel_auto AS personnel", "NULL::boolean AS personnel"))
+# Before migration 005 (CAT-WO-03) the subject columns don't exist (catalog_rows(v2=True) on a WO-02-only database)
+CATALOG_SQL_V2 = (CATALOG_SQL
+    .replace("coalesce(d.subject_codes_confirmed, d.subject_codes_auto)", "NULL::text[]")
+    .replace("coalesce(d.subject_person_confirmed, d.subject_person_auto)", "NULL::text")
+    .replace("d.personnel_auto AS personnel", "NULL::boolean AS personnel"))
 
 
-def catalog_rows(cur, ids, v1=False):
-    cur.execute(CATALOG_SQL_V1 if v1 else CATALOG_SQL, (list(ids),))
+def catalog_rows(cur, ids, v1=False, v2=None):
+    """v1: before migration 004; v2: before migration 005 (auto-detected when not given)."""
+    if v2 is None and not v1:
+        cur.execute("SELECT 1 FROM information_schema.columns WHERE table_schema='cat' AND table_name='document' AND column_name='subject_codes_auto'")
+        v2 = cur.fetchone() is None
+    cur.execute(CATALOG_SQL_V1 if v1 else CATALOG_SQL_V2 if v2 else CATALOG_SQL, (list(ids),))
     cols = [c.name for c in cur.description]
     return {r[0]: dict(zip(cols, r)) for r in cur.fetchall()}
 
