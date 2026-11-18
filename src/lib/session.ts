@@ -8,6 +8,9 @@ export const SESSION_COOKIE = "__Host-cat_s";
 export const FLOW_COOKIE = "__Host-cat_f";
 export const DRIVE_READ = "https://www.googleapis.com/auth/drive.metadata.readonly";
 export const DRIVE_WRITE = "https://www.googleapis.com/auth/drive.metadata";
+/** CAT-WO-03 R-026: the Workspace directory (staff names for Subject (person)). Requested ONLY when a person field is
+ *  edited (the subject directory route answers 409 consent_required with the directory login link); never at sign-in. */
+export const DIRECTORY_READ = "https://www.googleapis.com/auth/directory.readonly";
 
 export interface Session {
   v: 1;
@@ -103,4 +106,8 @@ export function getCookie(header: string | null | undefined, name: string): stri
 
 export function canWrite(s: Session | null): boolean {
   return !!s && s.scopes.includes(DRIVE_WRITE);
+}
+
+export function canReadDirectory(s: Session | null): boolean {
+  return !!s && s.scopes.includes(DIRECTORY_READ);
 }

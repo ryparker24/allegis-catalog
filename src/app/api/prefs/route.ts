@@ -2,12 +2,13 @@ import { getEnv } from "@/lib/env";
 import { json, requireUser } from "@/lib/guard";
 import { db } from "@/lib/db";
 import { parseLayout, parseSpec, SpecError } from "@/lib/find";
-import { REVIEW_COLUMNS, REVIEW_SORTABLE } from "@/lib/reviewq";
+import { LANES, REVIEW_COLUMNS, REVIEW_SORTABLE } from "@/lib/reviewq";
+import { checklistPref } from "@/lib/checklists";
 
 export const dynamic = "force-dynamic";
 
 /** Item 2: the last list state per user ("find"). Validated like a saved view; search text is never stored. */
-const KEYS = new Set(["find", "review"]);
+const KEYS = new Set(["find", "review", "checklists"]);
 
 export async function GET(req: Request) {
   const env = await getEnv();
@@ -26,10 +27,13 @@ export async function PUT(req: Request) {
   const b = (await req.json().catch(() => ({}))) as { key?: string; value?: Record<string, unknown> };
   if (!KEYS.has(String(b.key))) return json({ error: "bad_key" }, 400);
   let value;
-  try {
+  if (b.key === "checklists") {
+    value = checklistPref(b.value);   // CAT-WO-03: rule / scope / result filter / sort / page size / widths, whitelisted
+    if (!value) return json({ error: "bad_spec", reason: "checklists" }, 400);
+  } else try {
     const { search: _search, ...rest } = parseSpec(b.key === "review" ? { ...b.value, sort: undefined } : b.value);
     void _search;
-    const lanes = Array.isArray(b.value?.lanes) ? (b.value!.lanes as unknown[]).map(String).filter((l) => ["stage_unknown", "low_confidence_executed", "no_kind"].includes(l)) : undefined;
+    const lanes = Array.isArray(b.value?.lanes) ? (b.value!.lanes as unknown[]).map(String).filter((l) => (LANES as readonly string[]).includes(l)) : undefined;   // CAT-WO-03: every lane (status_unknown was dropped)
     // the Review queue sorts on its own columns (queue / confidence / ...): kept as {col, dir} only, validated on use
     // the Review sort column must be one the Review list can sort on (coder review: a bad one would break every visit)
     const rcol = b.key === "review" && b.value?.sort && typeof b.value.sort === "object" ? String((b.value.sort as { col?: unknown }).col ?? "") : "";

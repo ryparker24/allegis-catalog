@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, show, type NotShown, type Row } from "./client";
 import { SidePanel } from "./SidePanel";
 import { BulkEditDialog, EditForm, editInfo, type FieldInfo } from "./EditForm";
+import { SubjectForm } from "./SubjectForm";
 import { PageHeader } from "./AppShell";
 import { useOutside } from "./ViewTree";
 import { emit, EV, on, shownName, type ViewRef } from "./bus";
@@ -658,6 +659,8 @@ export function FindClient() {
               setOpen(upd);
               setRes((r) => (r ? { ...r, rows: r.rows.map((x) => (x.file_id === upd.file_id ? upd : x)) } : r));
             }} />
+            {/* CAT-WO-03 R-026: set or correct the document's Subject (roster codes / a staff account) */}
+            <SubjectForm row={open} onSaved={() => run(spec)} />
           </SidePanel>
         ) : null}
         {bulk ? <BulkEditDialog field={bulk} ids={[...checked]} onClose={() => setBulk(null)} onDone={() => run(spec)} /> : null}

@@ -36,6 +36,9 @@ export interface Row {
   issued_date: string | null;
   issuing_entity: string | null;
   receiving_entities: string[];
+  subject_codes?: string[];
+  subject_person?: string | null;
+  subject_candidates?: string[] | null;
   signed_date: string | null;
   effective_date: string | null;
   is_primary: boolean | null;

@@ -7,13 +7,14 @@ import { pageList, PickList, Pop, RangeInputs } from "./FindClient";
 import { shownName } from "./bus";
 import { Icon } from "./icons";
 import { EditForm, editInfo } from "./EditForm";
+import { SubjectForm } from "./SubjectForm";
 import { VOCAB, display, type VocabList } from "@/lib/vocab";
 
-type Counts = { stage_unknown?: number; status_unknown?: number; low_confidence_executed?: number; no_kind?: number; open_total?: number; reviewed_today?: number; reviewed_total?: number };
+type Counts = { match_subject?: number; stage_unknown?: number; status_unknown?: number; low_confidence_executed?: number; no_kind?: number; open_total?: number; reviewed_today?: number; reviewed_total?: number };
 export type Resp = { counts: Counts; page: number; pageSize?: number; matched?: number; nextPage: number | null; pageRows: number; rows: Row[]; notShown: NotShown; canWrite: boolean };
 
 // lane order as shown (R-022: "Status unknown" right after signing stage unknown)
-const REASON: Record<string, string> = { stage_unknown: "Stage unknown", status_unknown: "Status unknown", low_confidence_executed: "Fully executed (low confidence)", no_kind: "No kind" };
+const REASON: Record<string, string> = { stage_unknown: "Stage unknown", status_unknown: "Status unknown", low_confidence_executed: "Fully executed (low confidence)", no_kind: "No kind", match_subject: "Match subject" };
 const DOC_STATUSES = ["draft", "in_review", "final", "issued", "superseded"] as const;
 const SIGNAL: Record<string, string> = {
   sig_block: "signature block found", sig_page_image: "signature page is an image", scanned: "scanned", blank_line: "blank signature line",
@@ -54,6 +55,7 @@ function why(r: Row): string {
   if (r.stage_suggested && r.stage_suggested !== "unknown") parts.push(`scan suggests ${show("stage", r.stage_suggested)}`);
   const sig = (r.signals ?? []).map((s) => SIGNAL[s] ?? s);
   if (sig.length) parts.push(sig.join(", "));
+  else if (r.queue_reason === "match_subject") parts.push(`${r.subject_candidates?.length ?? 0} possible roster partner(s); pick one, several or none`);
   else if (r.queue_reason !== "no_kind" && r.queue_reason !== "status_unknown") parts.push("no scan signals");
   return parts.join(" · ");
 }
@@ -181,6 +183,7 @@ export function ReviewClient() {
       onNextPage={(p) => load(skipped, p, { back: !!data && p < data.page }).catch(onLoadError)}
       onPrevPage={() => data && load(skipped, prevPage(data.page), { back: true }).catch(onLoadError)}
       list={list} setList={setList} facets={facets} onClearSkipped={clearSkipped} statusPublished={statusPublished}
+      subjectSlot={cur ? <SubjectForm key={`s${cur.file_id}`} row={cur} lane onSaved={() => { load(skipped, data?.page ?? 0).catch(onLoadError); }} /> : null}
       editSlot={cur ? <EditForm key={cur.file_id} row={cur} source="review_edit" onSaved={() => { load(skipped, data?.page ?? 0).catch(onLoadError); }} /> : null} />
   );
 }
@@ -204,7 +207,7 @@ export interface ReviewViewProps {
   // CAT-WO-02 (optional, so the CAT-WO-01.1 render tests keep their props)
   list?: ReviewListState; setList?: (u: ReviewListState | ((l: ReviewListState) => ReviewListState)) => void;
   facets?: Record<string, Facet[]> | null; onClearSkipped?: () => void; onPrevPage?: () => void;
-  statusPublished?: boolean; editSlot?: ReactNode;
+  statusPublished?: boolean; editSlot?: ReactNode; subjectSlot?: ReactNode;
 }
 
 /** Dashboard-style counter card (Datum): caption, big number, one-line explanation. A lane card filters the list. */
@@ -216,7 +219,7 @@ function Kpi({ cap, n, exp, on, onClick }: { cap: string; n: number; exp: string
 }
 
 /** Presentational part of the Review page (no fetching), so it can be rendered in tests. */
-export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, setCur, setForm, onConfirm, onSkip, onNextPage, list = DEFAULT_LIST, setList, facets, onClearSkipped, onPrevPage, statusPublished = false, editSlot }: ReviewViewProps) {
+export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, setCur, setForm, onConfirm, onSkip, onNextPage, list = DEFAULT_LIST, setList, facets, onClearSkipped, onPrevPage, statusPublished = false, editSlot, subjectSlot }: ReviewViewProps) {
   const c = data?.counts ?? {};
   const [pop, setPop] = useState<string | null>(null);
   const [popAt, setPopAt] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
@@ -287,7 +290,7 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
     <div className="review">
       <PageHeader
         title="Review queue"
-        info={<>Files the catalog wants a person to check, most uncertain first: signing stage unknown, then fully executed at low confidence, then no kind, then status unknown. Each page is checked live against Drive as you; Confirm writes the Stage (or Status) and Catalog Review labels on the file. A bulk edit does not take a file out of the queue; only Confirmed or Wrong does.</>}
+        info={<>Files the catalog wants a person to check, most uncertain first: signing stage unknown, then fully executed at low confidence, then no kind, then match subject (which roster partner a document is about), then status unknown. Each page is checked live against Drive as you; Confirm writes the Stage (or Status) and Catalog Review labels on the file. A bulk edit does not take a file out of the queue; only Confirmed or Wrong does.</>}
         actions={setList ? <>
           <div className="pop-wrap">
             <button className="btn" aria-label="More actions" aria-expanded={pop === "more"} onClick={() => setPop(pop === "more" ? null : "more")}><Icon name="more" /></button>
@@ -303,6 +306,7 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
         <Kpi cap="Stage unknown" n={c.stage_unknown ?? 0} exp="Signed documents whose signing stage couldn't be read." on={list.lanes.includes("stage_unknown")} onClick={setList ? () => toggleLane("stage_unknown") : undefined} />
         <Kpi cap="Status unknown" n={c.status_unknown ?? 0} exp="Not a signed document, and no Draft / Final / Issued status found." on={list.lanes.includes("status_unknown")} onClick={setList ? () => toggleLane("status_unknown") : undefined} />
         <Kpi cap="Executed, low confidence" n={c.low_confidence_executed ?? 0} exp="Marked fully executed, but the scan isn't sure." on={list.lanes.includes("low_confidence_executed")} onClick={setList ? () => toggleLane("low_confidence_executed") : undefined} />
+        <Kpi cap="Match subject" n={c.match_subject ?? 0} exp="Which roster partner is this document about? (R-026)" on={list.lanes.includes("match_subject")} onClick={setList ? () => toggleLane("match_subject") : undefined} />
         <Kpi cap="No kind" n={c.no_kind ?? 0} exp="The catalog couldn't tell what the document is." on={list.lanes.includes("no_kind")} onClick={setList ? () => toggleLane("no_kind") : undefined} />
         <Kpi cap="Reviewed today" n={c.reviewed_today ?? 0} exp="Confirmed or marked wrong since midnight." />
         <Kpi cap="Skipped" n={skipped.length} exp="Set aside in this browser session; nothing written." />
@@ -389,6 +393,7 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
         </section>
         {cur ? (
           <SidePanel row={cur} onClose={() => setCur(null)}>
+            {cur.queue_reason === "match_subject" && subjectSlot ? subjectSlot : null}
             <form className="review-form" onSubmit={(e) => { e.preventDefault(); onConfirm(); }}>
               <p className="why small"><b>Why:</b> {why(cur)}</p>
               {isExecutable(cur) ? <fieldset>

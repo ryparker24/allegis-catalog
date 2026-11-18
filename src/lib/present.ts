@@ -28,6 +28,10 @@ export function present<T extends DbRow>(r: LiveRow<T>) {
     issued_date: hasField("exec", "issued_date") ? L.issued_date : ((d.issued_date as string | null) ?? null),
     issuing_entity: hasField("parties", "issuing_entity") ? L.issuing_entity : ((d.issuing_entity as string | null) ?? null),
     receiving_entities: hasField("parties", "receiving_entities") ? L.receiving_entities : ((d.receiving_entities as string[] | null) ?? []),
+    // R-026: codes / a staff account only; names for the codes come from app.v_party in the side panel
+    subject_codes: hasField("parties", "subject_codes") ? L.subject_codes : ((d.subject_codes as string[] | null) ?? []),
+    subject_person: hasField("parties", "subject_person") ? L.subject_person : ((d.subject_person as string | null) ?? null),
+    subject_candidates: (d.subject_candidates as string[] | null | undefined) ?? null,   // Match subject lane: codes
     signed_date: d.signed_date ?? null,
     effective_date: d.effective_date ?? null,
     is_primary: d.is_primary ?? null,

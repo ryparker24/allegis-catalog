@@ -203,7 +203,7 @@ export function pageSizeOf(spec: FindSpec): number {
   return (PAGE_SIZES as readonly number[]).includes(n) ? n : DEFAULT_PAGE_SIZE;
 }
 
-const SELECT_COLS = "file_id, document_id, kind, entities, portcos, fiscal_year, period, stage, signed_date, effective_date, workstream, issuer, tier, is_primary, modified_time, file_type_family, issuing_entity, receiving_entities, status, issued_date";
+const SELECT_COLS = "file_id, document_id, kind, entities, portcos, fiscal_year, period, stage, signed_date, effective_date, workstream, issuer, tier, is_primary, modified_time, file_type_family, issuing_entity, receiving_entities, status, issued_date, subject_codes, subject_person";
 
 /** Find reads app.v_find_x: v_find (secret tier excluded there) + the CAT-WO-02 fields. */
 export const FIND_VIEW = "app.v_find_x";

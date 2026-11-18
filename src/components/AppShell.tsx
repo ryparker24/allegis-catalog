@@ -9,7 +9,7 @@ import { useOutside, ViewTree } from "./ViewTree";
 const COLLAPSE_KEY = "catalog.sidebarCollapsed";
 
 /** Item 1: Datum-style shell. Dark rail (brand, nav, saved-view tree) + dark top bar (search, Labels, avatar). */
-export function AppShell({ email, active, signedIn, children }: { email: string | null; active: "find" | "review"; signedIn: boolean; children: React.ReactNode }) {
+export function AppShell({ email, active, signedIn, children }: { email: string | null; active: "find" | "review" | "checklists"; signedIn: boolean; children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState<number | null>(null);
@@ -67,9 +67,12 @@ export function AppShell({ email, active, signedIn, children }: { email: string 
             <Icon name="inbox" /><span className="lbl">Review queue</span>
             {reviewOpen != null ? <span className="badge-count" aria-label={`${reviewOpen} open`}>{reviewOpen.toLocaleString()}</span> : null}
           </a>
-          <span className="nav-item off" aria-disabled="true" title="Gaps is not built yet (R-006)">
-            <Icon name="gaps" /><span className="lbl">Gaps</span><span className="tag">R-006</span>
-          </span>
+          <a href="/checklists" className={`nav-item${active === "checklists" ? " on" : ""}`} aria-current={active === "checklists" ? "page" : undefined} title="Checklists">
+            <Icon name="gaps" /><span className="lbl">Checklists</span>
+          </a>
+          <a href="/checklists?tab=gaps" className="nav-item" title="Gaps (fund-level checklists, entity x period)">
+            <Icon name="gaps" /><span className="lbl">Gaps</span>
+          </a>
         </nav>
         {signedIn ? <ViewTree /> : null}
       </aside>

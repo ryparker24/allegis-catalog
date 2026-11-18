@@ -31,13 +31,14 @@ export async function handleLogin(req: Request, env: AppEnv): Promise<Response> 
   if (!acc.ok) return page403(acc.reason);
   if (!env.GOOGLE_CLIENT_ID || !env.SESSION_SECRET) return new Response("OAuth client not configured (R2)", { status: 503 });
   const u = new URL(req.url);
-  const write = u.searchParams.get("scope") === "write";
+  const write = u.searchParams.get("scope") === "write" || u.searchParams.get("scope") === "directory";
+  const directory = u.searchParams.get("scope") === "directory";   // R-026: only from a person-field edit
   const { verifier, challenge } = await pkce();
   const flow: Flow = { v: 1, state: randomToken(), verifier, next: safeNext(u.searchParams.get("next")), exp: nowS() + 600 };
   const current = await readSession(getCookie(req.headers.get("cookie"), SESSION_COOKIE), env.SESSION_SECRET);
   const loc = authUrl({
     clientId: env.GOOGLE_CLIENT_ID, redirectUri: `${origin(req, env)}/api/auth/callback`, state: flow.state, codeChallenge: challenge,
-    write, hd: env.ALLOWED_HD || DEFAULT_HD, loginHint: current?.email,
+    write, directory, hd: env.ALLOWED_HD || DEFAULT_HD, loginHint: current?.email,
   });
   return new Response(null, {
     status: 302,

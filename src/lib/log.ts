@@ -6,13 +6,16 @@ const ALLOWED_KEYS = new Set([
   "event", "file_id", "file_ids", "document_id", "status", "stage", "queue_reason", "labels", "count", "total",
   "dropped_no_access", "dropped_check_failed", "dropped_secret", "page", "page_size", "ms", "http_status",
   "drive_status", "reason", "route", "has_session", "can_write", "outcome", "format",
+  "rule_id", "action", "checklist", "lane",
 ]);
 // Per-key shapes (CISO review): ID keys take Drive/DB IDs only (no dots, spaces or slashes, so "x.pdf" and
 // "Some Name" fail); every other string key takes a lowercase snake_case code only.
 const ID_KEYS = new Set(["file_id", "file_ids", "document_id"]);
 const ID_SHAPED = /^[A-Za-z0-9_-]{1,80}$/;
 const CODE = /^[a-z0-9_]{1,64}$/;
-const shaped = (k: string, s: string) => (ID_KEYS.has(k) ? ID_SHAPED : CODE).test(s);
+// rule ids are upper-case codes (LP-SUB, K1-SET): their own shape, still no spaces / dots / lower-case words
+const RULE = /^[A-Z0-9-]{2,20}$/;
+const shaped = (k: string, s: string) => (ID_KEYS.has(k) ? ID_SHAPED : k === "rule_id" ? RULE : CODE).test(s);
 
 type Val = string | number | boolean | null | undefined | (string | number)[];
 

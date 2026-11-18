@@ -362,3 +362,22 @@ button.ctr.kpi { font: inherit; text-align: left; color: var(--ink); cursor: poi
 .modal-body { padding: 14px 16px; display: grid; gap: 8px; }
 .modal footer { padding: 12px 16px; border-top: 1px solid var(--border); justify-content: flex-end; }
 .report { margin: 0; padding-left: 18px; }
+
+/* ---------------------------------------------------------------- CAT-WO-03 Checklists */
+.cl-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; padding: 12px 16px; margin-bottom: 16px; }
+.cl-bar .cap { display: flex; flex-direction: column; gap: 4px; }
+.cl-bar .input { min-width: 140px; }
+.res { display: inline-block; white-space: nowrap; font-weight: 500; }
+.res-met { color: #1a7a45; } .res-onfile { color: var(--warn-ink); } .res-missing { color: #8f1c13; } .res-notreq, .res-info { color: var(--muted); }
+.req-panel h3.cap { margin: 16px 0 6px; }
+.req-panel .cands { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.req-panel .cands li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.req-panel .row-inline { display: flex; gap: 8px; }
+.req-panel textarea.input { width: 100%; }
+.req-panel .actions { display: flex; gap: 8px; margin-top: 8px; }
+.btn.small { padding: 2px 8px; font-size: 12px; }
+table.gaps td.gap { text-align: center; font: 500 12px/1.3 var(--f-mono); }
+td.gap-met { background: var(--primary-soft); } td.gap-onfile { background: var(--warn-soft); } td.gap-missing { background: #fde9e7; } td.gap-info { background: var(--table-head); color: var(--muted); }
+td.gap button.link { color: inherit; }
+.subject-box { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.subject-box .opts { display: grid; gap: 6px; margin: 8px 0; }

@@ -1,5 +1,5 @@
 import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from "jose";
-import { DRIVE_READ, DRIVE_WRITE } from "./session";
+import { DIRECTORY_READ, DRIVE_READ, DRIVE_WRITE } from "./session";
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 const gfetch: FetchLike = (i, init) => fetch(i, init);
@@ -7,13 +7,19 @@ const gfetch: FetchLike = (i, init) => fetch(i, init);
 // ------------------------------------------------------------------ OAuth (online access only)
 export const SIGNIN_SCOPES = ["openid", "email", DRIVE_READ];
 export const WRITE_SCOPES = ["openid", "email", DRIVE_WRITE];
+/** Only for a person-field edit (R-026). include_granted_scopes keeps the Drive grants. */
+export const DIRECTORY_SCOPES = ["openid", "email", DRIVE_WRITE, DIRECTORY_READ];
+export type ScopeSet = "read" | "write" | "directory";
+export function scopesFor(s: ScopeSet): string[] {
+  return s === "directory" ? DIRECTORY_SCOPES : s === "write" ? WRITE_SCOPES : SIGNIN_SCOPES;
+}
 
-export function authUrl(p: { clientId: string; redirectUri: string; state: string; codeChallenge: string; write: boolean; hd: string; loginHint?: string }): string {
+export function authUrl(p: { clientId: string; redirectUri: string; state: string; codeChallenge: string; write: boolean; directory?: boolean; hd: string; loginHint?: string }): string {
   const u = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   u.searchParams.set("client_id", p.clientId);
   u.searchParams.set("redirect_uri", p.redirectUri);
   u.searchParams.set("response_type", "code");
-  u.searchParams.set("scope", (p.write ? WRITE_SCOPES : SIGNIN_SCOPES).join(" "));
+  u.searchParams.set("scope", scopesFor(p.directory ? "directory" : p.write ? "write" : "read").join(" "));
   u.searchParams.set("access_type", "online"); // condition 2: Google issues no refresh token for online access
   u.searchParams.set("include_granted_scopes", "true"); // incremental consent for drive.metadata on first write
   u.searchParams.set("state", p.state);

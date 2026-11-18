@@ -47,13 +47,23 @@ export interface LiveValues {
   issued_date: string | null;
   issuing_entity: string | null;
   receiving_entities: string[];
+  /** R-026 (after publish): roster codes only (non-code text on the label is dropped), a staff account */
+  subject_codes: string[];
+  subject_person: string | null;
+}
+
+/** R-026: roster codes. Anything typed into Subject code(s) that is not a code is never shown, stored or written. */
+export const SUBJECT_CODE_RE = /^(LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?$/;
+export const STAFF_EMAIL_RE = /^[a-z0-9._%+-]{1,64}@allegiscapital\.com$/;
+export function codesFromText(t: string | null | undefined): string[] {
+  return [...new Set((t ?? "").split(/[,;\s]+/).map((x) => x.trim().toUpperCase()).filter((x) => SUBJECT_CODE_RE.test(x)))].sort();
 }
 
 type LabelField = { selection?: string[]; integer?: string[]; text?: string[]; dateString?: string[]; user?: { emailAddress?: string }[] };
 type LabelInfo = { labels?: { id: string; fields?: Record<string, LabelField> }[] } | null | undefined;
 
 export function decodeLabels(info: LabelInfo): LiveValues {
-  const v: LiveValues = { has_doc_label: false, kind: null, entities: [], portcos: [], fiscal_year: null, period: null, workstream: null, issuer: null, stage: null, executed_date: null, tier: null, contains: [], review_status: null, review_note: null, status: null, issued_date: null, issuing_entity: null, receiving_entities: [] };
+  const v: LiveValues = { has_doc_label: false, kind: null, entities: [], portcos: [], fiscal_year: null, period: null, workstream: null, issuer: null, stage: null, executed_date: null, tier: null, contains: [], review_status: null, review_note: null, status: null, issued_date: null, issuing_entity: null, receiving_entities: [], subject_codes: [], subject_person: null };
   for (const L of info?.labels ?? []) {
     const lk = labelKeyById.get(L.id);
     if (!lk) continue;
@@ -82,6 +92,12 @@ export function decodeLabels(info: LabelInfo): LiveValues {
         case "exec.issued_date": v.issued_date = fv.dateString?.[0] ?? null; break;
         case "parties.issuing_entity": v.issuing_entity = sel[0] ?? null; break;
         case "parties.receiving_entities": v.receiving_entities = sel.sort(); break;
+        case "parties.subject_codes": v.subject_codes = codesFromText((fv.text ?? []).join(" ")); break;
+        case "parties.subject_person": {
+          const em = (fv.user?.[0]?.emailAddress ?? "").toLowerCase();
+          v.subject_person = STAFF_EMAIL_RE.test(em) ? em : null;
+          break;
+        }
       }
     }
   }

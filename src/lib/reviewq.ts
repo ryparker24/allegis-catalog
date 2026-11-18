@@ -6,7 +6,7 @@
 import { buildWhere, pageSizeOf, parseSpec, SpecError, type FindSpec } from "./find";
 
 // display order (R-022: "Status unknown" right after signing stage unknown); the default QUEUE order is queue_rank in the view
-export const LANES = ["stage_unknown", "status_unknown", "low_confidence_executed", "no_kind"] as const;
+export const LANES = ["stage_unknown", "status_unknown", "low_confidence_executed", "no_kind", "match_subject"] as const;
 const SORT: Record<string, string> = {
   queue: "queue_rank, confidence_rank",
   queue_reason: "queue_rank",
@@ -54,7 +54,7 @@ export function reviewQuery(r: ReviewSpec, skip: string[], page: number): { sql:
     countSql: `SELECT count(*)::int AS n FROM app.v_review_queue WHERE ${parts.join(" AND ")}`,
     sql: `SELECT file_id, document_id, kind, entities, portcos, fiscal_year, period, stage, signed_date, effective_date, workstream, issuer,
                  tier, is_primary, modified_time, file_type_family, queue_reason, signals, confidence, stage_suggested,
-                 requires_execution, status
+                 requires_execution, status, subject_candidates
           FROM app.v_review_queue WHERE ${parts.join(" AND ")}
           ORDER BY ${order}, file_id LIMIT ${pageSize} OFFSET ${page * pageSize}`,
   };
