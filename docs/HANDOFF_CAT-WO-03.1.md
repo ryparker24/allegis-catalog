@@ -212,3 +212,25 @@ Measured on main, by document (primary copy), name patterns in memory:
 - **Now:** any document whose kind ends up Audited Financial Statements (person-set or machine) gets the annual period. A person's period still wins.
 - **AUD-01 on main:** **Met 17** (was 7) · on file without a status 13 · not the satisfying kind 4 · 34 rows. Audited FS documents: 456.
 - **This changes the re-sync plan** (more Period writes). The dry run above predates it; a final dry run is needed before applying.
+
+## Final CAT-WO-03.1 re-sync dry run (code `16d9514`, from `app-main`, run as its own Windows process)
+- `nightly_20261119_1242_dry.log`: read 46,259 · person-owned skipped 0 · errors 0 · Entity held 1 · 1,480 s.
+- **Peak memory: 223 MB** (before the segmentation: **825 MB**).
+- **Would re-sync 2,188 files:**
+
+| field | files | why |
+|---|---:|---|
+| Issuing entity | 1,600 | K-1 parties catch-up (Part 2 rules first fully run; not CAT-WO-03.1) |
+| Receiving entities | 1,604 | same |
+| Period | 394 | audited statements → annual (fiscal year), instead of the quarter of the folder they were filed in |
+| Kind | 196 | audited-FS conversions; P2 emails → Correspondence; P3 sheets → Financial Statements; P5 audited PDFs → Audited FS |
+| Entity | 155 | full derive (legal-name rules incl. CIP-I ENT-027) |
+| Effective date | 34 | full derive |
+| Workstream | 18 | full derive |
+| Issuer | 17 | full derive |
+| Status | 9 | P4: Word files of the audited statements → Draft |
+| Subject code(s) | 6 | subject step |
+
+- The 16 period changes skipped as person-owned in the earlier dry run are gone: the annual-period fix now agrees with the period those files were given by hand.
+- **STOP: Ryan approves before `--apply`.** The nightly task stays **disabled** until then: enabled, its 22:00 run would apply this.
+- **Signed-in smoke test: pending.** Neither ThinkPad Chrome connected to Claude has an app session (one shows the app's Sign-in page, the other the Cloudflare Access sign-in). Unauthenticated checks pass (302 to Access).
