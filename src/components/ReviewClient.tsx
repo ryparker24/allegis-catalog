@@ -3,7 +3,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { api, show, type NotShown, type Row } from "./client";
 import { SidePanel } from "./SidePanel";
 import { PageHeader } from "./AppShell";
-import { pageList, PickList, Pop, RangeInputs } from "./FindClient";
+import { ContainsInput, pageList, PickList, Pop, RangeInputs } from "./FindClient";
+import { LocationCell } from "./Location";
 import { shownName } from "./bus";
 import { Icon } from "./icons";
 import { EditForm, editInfo } from "./EditForm";
@@ -30,13 +31,13 @@ const PAGE_SIZES = [10, 25, 100];
 type Range = { from?: string; to?: string };
 export type ReviewListState = {
   lanes: string[];
-  filters: { kind?: string[]; entity?: string[]; stage?: string[]; fy_range?: Range };
+  filters: { kind?: string[]; entity?: string[]; stage?: string[]; fy_range?: Range; location?: string };
   sort: { col: string; dir: "asc" | "desc" };
   pageSize: number;
   widths: Record<string, number>;
 };
 export const DEFAULT_LIST: ReviewListState = { lanes: [], filters: {}, sort: { col: "queue", dir: "asc" }, pageSize: 25, widths: {} };
-type Col = { key: string; label: string; width: number; sort?: string; filter?: "lane" | "kind" | "entity" | "stage" | "fy" };
+type Col = { key: string; label: string; width: number; sort?: string; filter?: "lane" | "kind" | "entity" | "stage" | "fy" | "location" };
 const COLS: Col[] = [
   { key: "name", label: "File", width: 300 },
   { key: "why", label: "Why", width: 300, sort: "queue", filter: "lane" },
@@ -46,6 +47,7 @@ const COLS: Col[] = [
   { key: "entities", label: "Entity", width: 120, sort: "entities", filter: "entity" },
   { key: "fiscal_year", label: "Fiscal year", width: 100, sort: "fiscal_year", filter: "fy" },
   { key: "confidence", label: "Confidence", width: 110, sort: "confidence" },
+  { key: "location", label: "Location", width: 260, sort: "location", filter: "location" },   // CAT-WO-03.1
 ];
 type Facet = { value: string; n: number; label?: string };
 
@@ -63,7 +65,7 @@ function loadSkipped(): string[] {
   try { return JSON.parse(sessionStorage.getItem(SKIP_KEY) ?? "[]"); } catch { return []; }
 }
 const activeFilters = (l: ReviewListState) =>
-  l.lanes.length + (l.filters.kind?.length ? 1 : 0) + (l.filters.entity?.length ? 1 : 0) + (l.filters.stage?.length ? 1 : 0) + (l.filters.fy_range?.from || l.filters.fy_range?.to ? 1 : 0);
+  l.lanes.length + (l.filters.kind?.length ? 1 : 0) + (l.filters.entity?.length ? 1 : 0) + (l.filters.stage?.length ? 1 : 0) + (l.filters.fy_range?.from || l.filters.fy_range?.to ? 1 : 0) + (l.filters.location ? 1 : 0);
 
 export function ReviewClient() {
   const [data, setData] = useState<Resp | null>(null);
@@ -242,12 +244,13 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
         <label key={k} className="opt"><input type="checkbox" checked={list.lanes.includes(k)} onChange={() => toggleLane(k)} /> {l}</label>
       ))}</div>
     );
+    if (f === "location") return <ContainsInput value={list.filters.location ?? ""} onChange={(x) => { upd({ filters: { ...list.filters, location: x || undefined } }); setPop(null); }} />;
     if (f === "fy") return <RangeInputs type="year" value={list.filters.fy_range ?? {}} onChange={(r) => { upd({ filters: { ...list.filters, fy_range: r } }); setPop(null); }} />;
     const key = f === "kind" ? "kind" : f === "entity" ? "entity" : "stage";
     const v = ((list.filters as Record<string, string[] | undefined>)[key]) ?? [];
     return <PickList options={facets?.[key] ?? []} value={v} onChange={(x) => upd({ filters: { ...list.filters, [key]: x } })} label={label(key === "entity" ? undefined : (key as VocabList))} />;
   };
-  const isOn = (f: Col["filter"]) => f === "lane" ? list.lanes.length > 0 : f === "fy" ? !!(list.filters.fy_range?.from || list.filters.fy_range?.to)
+  const isOn = (f: Col["filter"]) => f === "location" ? !!list.filters.location : f === "lane" ? list.lanes.length > 0 : f === "fy" ? !!(list.filters.fy_range?.from || list.filters.fy_range?.to)
     : !!((list.filters as Record<string, string[] | undefined>)[f === "kind" ? "kind" : f === "entity" ? "entity" : "stage"]?.length);
   const nFilters = activeFilters(list);
   const rows = (data?.rows ?? []).filter((r) => !skipped.includes(r.file_id));
@@ -282,9 +285,10 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
     if (v?.length) chips.push({ k, label: lbl, text: v.map((x) => (voc && x !== "(none)" ? display(voc, x) : x)).join(", "), clear: () => upd({ filters: { ...list.filters, [k]: [] } }) });
   }
   const fy = list.filters.fy_range;
+  if (list.filters.location) chips.push({ k: "location", label: "Location", text: `contains “${list.filters.location}”`, clear: () => upd({ filters: { ...list.filters, location: undefined } }) });
   if (fy?.from || fy?.to) chips.push({ k: "fy", label: "Fiscal year", text: fy.from && fy.to ? `${fy.from} – ${fy.to}` : fy.from ? `from ${fy.from}` : `to ${fy.to}`, clear: () => upd({ filters: { ...list.filters, fy_range: {} } }) });
   const cell = (r: Row, k: string) =>
-    k === "name" ? shownName(r.name, r.file_id) : k === "why" ? why(r) : k === "confidence" ? (r.confidence ?? "") : show(k, (r as unknown as Record<string, unknown>)[k]);
+    k === "name" ? shownName(r.name, r.file_id) : k === "why" ? why(r) : k === "confidence" ? (r.confidence ?? "") : k === "location" ? <LocationCell location={r.location} folderId={r.location_folder_id} other={r.other_locations} /> : show(k, (r as unknown as Record<string, unknown>)[k]);
 
   return (
     <div className="review">

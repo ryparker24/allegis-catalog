@@ -4,6 +4,7 @@ import { api } from "./client";
 import { PageHeader } from "./AppShell";
 import { maskNames, shownName } from "./bus";
 import { display } from "@/lib/vocab";
+import { LocationCell } from "./Location";
 
 /** CAT-WO-03 item 5 · Checklists (Datum look): pick a checklist and a scope; one row per requirement, most urgent first. */
 type Doc = { access: "ok"; file_id: string; name: string; link: string } | { access: "no_access" | "check_failed" | "out_of_scope" } | null;
@@ -15,7 +16,7 @@ type Req = {
 };
 type Rule = { id: string; checklist: string; title: string; subtype: string | null; subject: string };
 type Resp = { rules: Rule[]; entities: string[]; years: number[]; quarters: boolean; counts: Record<string, number>; matched: number; rows: Req[]; canWrite: boolean };
-type Cand = { kind: string; stage: string | null; status: string | null; date: string | null; satisfying: boolean; partner_conf: string | null; is_primary: boolean; doc: Doc };
+type Cand = { kind: string; stage: string | null; status: string | null; date: string | null; satisfying: boolean; partner_conf: string | null; is_primary: boolean; doc: Doc; location?: string | null; location_folder_id?: string | null; other_locations?: number | null };
 type State = { rule: string; entity: string | null; fy: number | null; q: number | null; results: string[]; sort: string; dir: "asc" | "desc"; pageSize: number; widths: Record<string, number>; tab: "rows" | "gaps" };
 const DEFAULT: State = { rule: "LP-SUB", entity: null, fy: null, q: null, results: [], sort: "urgency", dir: "asc", pageSize: 25, widths: {}, tab: "rows" };
 
@@ -249,12 +250,20 @@ export function ChecklistsClient() {
   );
 }
 
+type Hit = { file_id: string; name: string; kind: string | null; entities?: string[]; fiscal_year?: number | null; period?: string | null; location?: string | null; location_folder_id?: string | null; other_locations?: number | null };
+const LINK_KIND_NAME: Record<string, string> = { "LP-SUB": "Subscription Agreement", "LP-SIDE": "Side Letter", "GP-COMMIT": "Subscription Agreement",
+  "AUDITED-FS": "Audited Financial Statements", "K1-SET": "K-1", "PCAP-Q": "Capital Statement" };
+function linkHint(r: Req): string {
+  return [LINK_KIND_NAME[r.rule_id] ?? "the rule's kind", r.entity_code, r.fiscal_year ? `FY${r.fiscal_year}` : null,
+    r.rule_id === "AUDITED-FS" ? "annual" : r.fiscal_quarter ? `Q${r.fiscal_quarter}` : null].filter(Boolean).join(", ");
+}
+
 /** Row actions: Link document (a candidate, or a Find search), Not required (with a reason), Clear override. */
 function RowPanel({ r, rule, onClose, onChanged }: { r: Req; rule?: Rule; onClose: () => void; onChanged: () => void }) {
   const [cands, setCands] = useState<{ candidates: Cand[]; not_in_scope: number } | null>(null);
   const [note, setNote] = useState("");
   const [q, setQ] = useState("");
-  const [hits, setHits] = useState<{ file_id: string; name: string; kind: string | null }[] | null>(null);
+  const [hits, setHits] = useState<Hit[] | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -270,7 +279,9 @@ function RowPanel({ r, rule, onClose, onChanged }: { r: Req; rule?: Rule; onClos
   const search = async () => {
     if (q.trim().length < 2) return;
     try {
-      const f = await api<{ rows: { file_id: string; name: string; kind: string | null }[] }>("/api/find", { method: "POST", body: JSON.stringify({ search: q.trim(), filters: { entity: [r.entity_code] }, pageSize: 10 }) });
+      // CAT-WO-03.1 (Ryan): the WHOLE catalog, any kind / entity / year - a Drive name search as the user. Choosing one
+      // links it AND labels it to match this requirement (kind, entity, FY, period), as you.
+      const f = await api<{ rows: Hit[] }>("/api/find", { method: "POST", body: JSON.stringify({ search: q.trim(), pageSize: 25 }) });
       setHits(f.rows);
     } catch (e) { setMsg((e as Error).message); }
   };
@@ -292,7 +303,7 @@ function RowPanel({ r, rule, onClose, onChanged }: { r: Req; rule?: Rule; onClos
         <ul className="cands">
           {cands.candidates.map((c, i) => (
             <li key={i}>
-              {docCell(c.doc)} <span className="muted small">· {display("kind", c.kind)}{c.stage && c.stage !== "n_a" ? ` · ${display("stage", c.stage)}` : ""}{c.status ? ` · ${display("status", c.status)}` : ""}{c.date ? ` · ${c.date}` : ""}{c.partner_conf ? ` · partner match ${c.partner_conf}` : ""}{c.satisfying ? " · qualifies" : ""}</span>
+              {docCell(c.doc)}{c.location ? <> <LocationCell location={c.location} folderId={c.location_folder_id} other={c.other_locations} /></> : null} <span className="muted small">· {display("kind", c.kind)}{c.stage && c.stage !== "n_a" ? ` · ${display("stage", c.stage)}` : ""}{c.status ? ` · ${display("status", c.status)}` : ""}{c.date ? ` · ${c.date}` : ""}{c.partner_conf ? ` · partner match ${c.partner_conf}` : ""}{c.satisfying ? " · qualifies" : ""}</span>
               {c.doc && c.doc.access === "ok" ? <button className="btn small" disabled={busy} onClick={() => post({ action: "link", file_id: (c.doc as { file_id: string }).file_id })}>This is the one</button> : null}
             </li>
           ))}
@@ -301,13 +312,15 @@ function RowPanel({ r, rule, onClose, onChanged }: { r: Req; rule?: Rule; onClos
       {cands?.not_in_scope ? <p className="muted small">{cands.not_in_scope} candidate(s) left the catalog&apos;s scope and are not shown.</p> : null}
       <h3 className="cap">Link another document</h3>
       <div className="row-inline">
-        <input className="input" value={q} maxLength={100} onChange={(e) => setQ(e.target.value)} placeholder={`Find in ${r.entity_code} by name or code`} onKeyDown={(e) => { if (e.key === "Enter") search(); }} />
+        <input className="input" value={q} maxLength={100} onChange={(e) => setQ(e.target.value)} placeholder="Find anywhere in the catalog by name" onKeyDown={(e) => { if (e.key === "Enter") search(); }} />
         <button className="btn" onClick={search}>Find</button>
       </div>
       {hits ? (hits.length ? <ul className="cands">{hits.map((h) => (
-        <li key={h.file_id}>{shownName(h.name, h.file_id)} <span className="muted small">· {h.kind ? display("kind", h.kind) : "no kind"}</span>
+        <li key={h.file_id}>{shownName(h.name, h.file_id)} <span className="muted small">· {h.kind ? display("kind", h.kind) : "no kind"} · {h.entities?.length ? h.entities.join(", ") : "no entity"} · {h.fiscal_year ? `FY${h.fiscal_year}` : "no FY"}{h.period ? ` ${h.period}` : ""}</span>
+          {h.location ? <> <LocationCell location={h.location} folderId={h.location_folder_id} other={h.other_locations} /></> : null}
           <button className="btn small" disabled={busy} onClick={() => post({ action: "link", file_id: h.file_id })}>This is the one</button></li>))}</ul>
-        : <p className="muted small">Nothing found.</p>) : null}
+        : <p className="muted small">Nothing found in the catalog by that name.</p>) : null}
+      <p className="muted small">Choosing a document links it here and sets its labels to match: {linkHint(r)}.</p>
       <h3 className="cap">Not required</h3>
       <textarea className="input" rows={2} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Reason (required). Use partner codes, never names." />
       <div className="actions">

@@ -18,12 +18,20 @@ export async function GET(req: Request) {
   if (!r.length) return json({ error: "not_found" }, 404);
   const cands = (r[0].candidates ?? []).slice(0, 10);
   // still in the app's scope (labelled, not secret) - a candidate that left it is not shown at all
-  const inScope = new Set((await D.rows<{ file_id: string }>("SELECT file_id FROM app.v_find_x WHERE file_id = ANY($1::text[])", [cands.map((c) => c.file_id)])).map((x) => x.file_id));
+  const scope = await D.rows<{ file_id: string; location: string | null; location_folder_id: string | null; other_locations: number }>(
+    "SELECT file_id, location, location_folder_id, other_locations FROM app.v_find_x WHERE file_id = ANY($1::text[])", [cands.map((c) => c.file_id)]);
+  const inScope = new Map(scope.map((x) => [x.file_id, x]));
   const kept = cands.filter((c) => inScope.has(c.file_id));
   const acc = await accessFor(g.session.at, kept.map((c) => c.file_id));
   if (acc.expired) return json({ error: "signin_required", login: "/api/auth/login" }, 401);
   return json({
-    candidates: kept.map(({ file_id, document_id: _d, ...c }) => ({ ...c, doc: shownDoc(file_id, acc.map.get(file_id)) })),
+    candidates: kept.map(({ file_id, document_id: _d, ...c }) => {
+      // CAT-WO-03.1 Location: like the name, only when the live check as the user passed
+      const ok = acc.map.get(file_id)?.state === "ok";
+      const l = inScope.get(file_id)!;
+      return { ...c, doc: shownDoc(file_id, acc.map.get(file_id)),
+        location: ok ? l.location : null, location_folder_id: ok ? l.location_folder_id : null, other_locations: ok ? l.other_locations : 0 };
+    }),
     not_in_scope: cands.length - kept.length,
   });
 }

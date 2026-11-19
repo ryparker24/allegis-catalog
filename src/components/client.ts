@@ -38,6 +38,10 @@ export interface Row {
   receiving_entities: string[];
   subject_codes?: string[];
   subject_person?: string | null;
+  /** CAT-WO-03.1 Location (live-checked rows only) */
+  location?: string | null;
+  location_folder_id?: string | null;
+  other_locations?: number | null;
   subject_candidates?: string[] | null;
   signed_date: string | null;
   effective_date: string | null;

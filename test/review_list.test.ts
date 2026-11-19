@@ -85,7 +85,7 @@ describe("CAT-WO-02 item 6 · Review lanes and the Status write", () => {
     const q = reviewQuery(parseReviewSpec(JSON.stringify({ sort: { col: "status", dir: "asc" } }), "status_unknown"), [], 0);
     expect(q.params).toContainEqual(["status_unknown"]);
     expect(q.sql).toContain("ORDER BY status ASC NULLS LAST");
-    expect(q.sql).toMatch(/requires_execution, status, subject_candidates\s+FROM app.v_review_queue/);   // + CAT-WO-03 Match subject
+    expect(q.sql).toMatch(/requires_execution, status, subject_candidates, location, location_folder_id, other_locations\s+FROM app.v_review_queue/);   // + CAT-WO-03 Match subject, CAT-WO-03.1 Location
   });
   it("doc_status: accepted once Status is published (refused before), never together with a stage, unknown values refused", () => {
     if (hasField("exec", "status")) expect(validateReview({ status: "confirmed", doc_status: "final" })).toMatchObject({ ok: true, value: { docStatus: "final" } });

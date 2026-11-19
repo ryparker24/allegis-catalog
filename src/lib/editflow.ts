@@ -2,7 +2,7 @@ import type { Db } from "./db";
 import type { Session } from "./session";
 import { BULK_CAP, buildEditMods, bulkWrite, editRecord, validateEdit, type EditSet } from "./edit";
 import { driveBatchGet, FILE_ID_RE, isTransient, modifyLabels, type FetchLike } from "./google";
-import { decodeLabels, INCLUDE_LABELS } from "./labels";
+import { decodeLabels, INCLUDE_LABELS, type LiveValues } from "./labels";
 import { logEvent } from "./log";
 
 type Out = { status: number; body: Record<string, unknown> };
@@ -12,8 +12,8 @@ const ACCESS_FIELDS = "id,capabilities/canModifyLabels,labelInfo";
  * The user's live access check (R-020 condition 1) before any write: the file must open for them, they must be
  * allowed to change its labels, and its live Handling tier must not be secret. Returns the ids that pass.
  */
-export async function liveWritable(token: string, ids: string[], f?: FetchLike): Promise<{ ok: string[]; noAccess: string[]; checkFailed: string[]; expired: boolean; stage: Map<string, string | null> }> {
-  const out = { ok: [] as string[], noAccess: [] as string[], checkFailed: [] as string[], expired: false, stage: new Map<string, string | null>() };
+export async function liveWritable(token: string, ids: string[], f?: FetchLike): Promise<{ ok: string[]; noAccess: string[]; checkFailed: string[]; expired: boolean; stage: Map<string, string | null>; live: Map<string, LiveValues> }> {
+  const out = { ok: [] as string[], noAccess: [] as string[], checkFailed: [] as string[], expired: false, stage: new Map<string, string | null>(), live: new Map<string, LiveValues>() };
   for (let i = 0; i < ids.length; i += 100) {
     const chunk = ids.slice(i, i + 100);
     const m = await driveBatchGet(token, chunk, { fields: ACCESS_FIELDS, includeLabels: INCLUDE_LABELS }, f);
@@ -25,7 +25,7 @@ export async function liveWritable(token: string, ids: string[], f?: FetchLike):
         const caps = it.body.capabilities as { canModifyLabels?: boolean } | undefined;
         const live = decodeLabels(it.body.labelInfo as never);
         if (caps?.canModifyLabels === false || live.tier === "secret") out.noAccess.push(id);
-        else { out.ok.push(id); out.stage.set(id, live.stage); }
+        else { out.ok.push(id); out.stage.set(id, live.stage); out.live.set(id, live); }
         continue;
       }
       if (isTransient(it)) out.checkFailed.push(id); else out.noAccess.push(id);
@@ -35,7 +35,7 @@ export async function liveWritable(token: string, ids: string[], f?: FetchLike):
 }
 
 /** status: 'confirmed' for a single edit (the person reviewed the file), 'edited' for bulk (a field changed, file not reviewed). */
-async function recordEvents(D: Db, rows: { file_id: string; document_id: string | null }[], email: string, e: EditSet, labels: string[], source: string, status: "confirmed" | "edited" = "confirmed") {
+export async function recordEvents(D: Db, rows: { file_id: string; document_id: string | null }[], email: string, e: EditSet, labels: string[], source: string, status: "confirmed" | "edited" = "confirmed") {
   if (!rows.length) return;
   // one multi-row insert (codes only in edits)
   const params: unknown[] = [];

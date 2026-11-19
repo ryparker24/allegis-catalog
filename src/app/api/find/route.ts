@@ -6,6 +6,24 @@ import { driveNameSearch } from "@/lib/google";
 import { liveCheck, type DbRow } from "@/lib/live";
 import { present } from "@/lib/present";
 import { logEvent } from "@/lib/log";
+import { accessFor } from "@/lib/checklists";
+
+/** CAT-WO-03.1: a Location group header is a path - shown only when its file opens for the user (live, now); the rest
+ *  are pooled into one group with no path. Group values for other columns are codes and pass through. */
+const NO_ACCESS_GROUP = "(locations you can't open)";
+async function liveGroups(token: string, groupBy: string | null | undefined, groups: { value: string; n: number; rep?: string }[]) {
+  if (groupBy !== "location" || !groups.length) return { groups: groups.map(({ value, n }) => ({ value, n })), expired: false };
+  const acc = await accessFor(token, groups.map((x) => x.rep!).filter(Boolean));
+  if (acc.expired) return { groups: [], expired: true };
+  const out: { value: string; n: number }[] = [];
+  let hidden = 0;
+  for (const x of groups) {
+    if (x.rep && acc.map.get(x.rep)?.state === "ok") out.push({ value: x.value, n: x.n });
+    else hidden += x.n;
+  }
+  if (hidden) out.push({ value: NO_ACCESS_GROUP, n: hidden });
+  return { groups: out, expired: false };
+}
 
 export const dynamic = "force-dynamic";
 
@@ -36,14 +54,16 @@ export async function POST(req: Request) {
   const [rows, cnt, groups] = await Promise.all([
     D.rows<DbRow>(q.sql, q.params),
     D.rows<{ n: number }>(q.countSql, q.params),
-    gq ? D.rows<{ value: string; n: number }>(gq.sql, gq.params) : Promise.resolve([]),
+    gq ? D.rows<{ value: string; n: number; rep?: string }>(gq.sql, gq.params) : Promise.resolve([]),
   ]);
   const live = await liveCheck(g.session.at, rows);
   if (live.sessionExpired) return json({ error: "signin_required", login: "/api/auth/login" }, 401);
+  const lg = await liveGroups(g.session.at, spec.groupBy, groups);
+  if (lg.expired) return json({ error: "signin_required", login: "/api/auth/login" }, 401);
   const total = cnt[0]?.n ?? 0;
   logEvent("find", { page: q.page, count: rows.length, total, dropped_no_access: live.notShown.noAccess, dropped_check_failed: live.notShown.checkFailed, ms: Date.now() - t0 });
   return json({
-    total, page: q.page, pageSize: q.pageSize, pageRows: rows.length, rows: live.rows.map(present), notShown: live.notShown, groups,
+    total, page: q.page, pageSize: q.pageSize, pageRows: rows.length, rows: live.rows.map(present), notShown: live.notShown, groups: lg.groups,
     search: spec.search ? { nameMatches: names.ids.length, nameCapped: names.capped, nameSearchFailed: names.failed } : null,
   });
 }

@@ -8,6 +8,8 @@ import { PageHeader } from "./AppShell";
 import { useOutside } from "./ViewTree";
 import { emit, EV, on, shownName, type ViewRef } from "./bus";
 import { Icon } from "./icons";
+import { LocationCell, truncPath } from "./Location";
+import { maskNames } from "./bus";
 import { COLUMN_BY_KEY, COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_PAGE_SIZE, PAGE_SIZES, PICK_FILTER_KEY, isSortable, type ColDef } from "@/lib/columns";
 import { display, type VocabList } from "@/lib/vocab";
 
@@ -31,7 +33,7 @@ type Folder = { folder_id: number; name: string; parent_id: number | null };
 
 const EMPTY: Spec = { filters: {}, sort: { col: "modified_time", dir: "desc" }, groupBy: null, page: 0, pageSize: DEFAULT_PAGE_SIZE };
 const DEFAULT_LAYOUT: Layout = { columns: DEFAULT_COLUMNS, widths: {} };
-const GROUPS: [string, string][] = [["", "No grouping"], ["kind", "Kind"], ["entity", "Entity"], ["portco", "Portco"], ["fiscal_year", "Fiscal year"], ["stage", "Signing stage"], ["tier", "Handling"], ["workstream", "Workstream"]];
+const GROUPS: [string, string][] = [["", "No grouping"], ["kind", "Kind"], ["entity", "Entity"], ["portco", "Portco"], ["fiscal_year", "Fiscal year"], ["stage", "Signing stage"], ["tier", "Handling"], ["workstream", "Workstream"], ["location", "Location"]];
 /** Filter-bar fields (Datum's filter bar). The same filters also sit in each column header. */
 const BAR: { key: string; label: string; facet: string; vocab?: VocabList }[] = [
   { key: "kind", label: "Kind", facet: "kind", vocab: "kind" }, { key: "entity", label: "Entity", facet: "entity" }, { key: "portco", label: "Portco", facet: "portco" },
@@ -136,7 +138,7 @@ export function RangeInputs({ type, value, onChange }: { type: "year" | "date"; 
   );
 }
 
-function ContainsInput({ value, onChange }: { value: string; onChange: (s: string) => void }) {
+export function ContainsInput({ value, onChange }: { value: string; onChange: (s: string) => void }) {
   const [v, setV] = useState(value);
   return (
     <>
@@ -393,6 +395,7 @@ export function FindClient() {
     if (k === "review_status") return r.review_status ? <span className={`badge review-${r.review_status}`}>{show("review", r.review_status) || r.review_status}</span> : null;
     if (k === "kind" && v) return <span title={String(v)}>{show(k, v)}</span>;
     if (k === "file_id" || k === "document_id") return <code>{v == null ? "" : String(v)}</code>;
+    if (k === "location") return <LocationCell location={r.location} folderId={r.location_folder_id} other={r.other_locations} />;
     return show(k, v);
   };
 
@@ -623,7 +626,7 @@ export function FindClient() {
                 <tbody key={g.key || "all"}>
                   {spec.groupBy ? (
                     <tr className="grp"><td colSpan={cols.length + 1}>
-                      {g.key === "(none)" ? "(none)" : show(spec.groupBy === "entity" || spec.groupBy === "portco" ? "x" : spec.groupBy, g.key)}
+                      {g.key === "(none)" ? "(none)" : spec.groupBy === "location" ? (maskNames() ? "Location ••••" : <span title={g.key}>{truncPath(g.key, 90)}</span>) : show(spec.groupBy === "entity" || spec.groupBy === "portco" ? "x" : spec.groupBy, g.key)}
                       <span className="muted"> · {g.rows.length} on this page{groupCounts.has(g.key) ? ` of ${groupCounts.get(g.key)!.toLocaleString()} matched` : ""}</span>
                     </td></tr>
                   ) : null}

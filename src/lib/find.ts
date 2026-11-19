@@ -8,7 +8,7 @@ import { VOCAB } from "./vocab";
 /** v1 page size (CAT-WO-01). Find and the Review queue now use spec.pageSize (10 / 25 / 100). */
 export const PAGE_SIZE = 50;
 
-export const GROUPABLE = ["kind", "entity", "portco", "fiscal_year", "stage", "tier", "workstream"] as const;
+export const GROUPABLE = ["kind", "entity", "portco", "fiscal_year", "stage", "tier", "workstream", "location"] as const;
 export type GroupBy = (typeof GROUPABLE)[number];
 
 export type Range = { from?: string | number | null; to?: string | number | null };
@@ -41,6 +41,8 @@ export interface FindSpec {
     effective_date?: Range;
     file_id?: string;
     document_id?: string;
+    /** CAT-WO-03.1: "path contains" on drive › folder path (the crawl's path data, never a label) */
+    location?: string;
   };
   search?: string;
   sort?: { col: string; dir: "asc" | "desc" };
@@ -172,6 +174,8 @@ export function buildWhere(spec: FindSpec, opts: WhereOpts = {}): Built {
   if (fid) parts.push(`file_id ILIKE ${p("%" + likeEscape(fid) + "%")}`);
   const did = contains(f.document_id, "document_id");
   if (did) parts.push(`document_id::text ILIKE ${p("%" + likeEscape(did) + "%")}`);
+  const loc = contains(f.location, "location");
+  if (loc) parts.push(`location ILIKE ${p("%" + likeEscape(loc) + "%")}`);
 
   const term = parseSearch(spec.search);
   if (term) {
@@ -203,7 +207,7 @@ export function pageSizeOf(spec: FindSpec): number {
   return (PAGE_SIZES as readonly number[]).includes(n) ? n : DEFAULT_PAGE_SIZE;
 }
 
-const SELECT_COLS = "file_id, document_id, kind, entities, portcos, fiscal_year, period, stage, signed_date, effective_date, workstream, issuer, tier, is_primary, modified_time, file_type_family, issuing_entity, receiving_entities, status, issued_date, subject_codes, subject_person";
+const SELECT_COLS = "file_id, document_id, kind, entities, portcos, fiscal_year, period, stage, signed_date, effective_date, workstream, issuer, tier, is_primary, modified_time, file_type_family, issuing_entity, receiving_entities, status, issued_date, subject_codes, subject_person, location, location_folder_id, other_locations";
 
 /** Find reads app.v_find_x: v_find (secret tier excluded there) + the CAT-WO-02 fields. */
 export const FIND_VIEW = "app.v_find_x";
@@ -228,7 +232,10 @@ export function groupQuery(spec: FindSpec, opts: WhereOpts = {}): (Built & { sql
   const expr = g === "entity" ? "unnest(CASE WHEN cardinality(entities)=0 THEN ARRAY[NULL::text] ELSE entities END)"
     : g === "portco" ? "unnest(CASE WHEN cardinality(portcos)=0 THEN ARRAY[NULL::text] ELSE portcos END)"
     : g === "fiscal_year" ? "fiscal_year::text" : g;
-  return { where, params, sql: `SELECT coalesce(g, '${NONE}') AS value, count(*)::int AS n FROM (SELECT ${expr} AS g FROM ${FIND_VIEW} ${where}) x GROUP BY 1 ORDER BY 2 DESC LIMIT 500` };
+  // Location headers are paths: each group carries ONE of its files so the route can live-check it as the user and
+  // show the path only when that file opens (CAT-WO-03.1, "shown only for rows that pass the live access check")
+  const rep = g === "location" ? ", min(fid) AS rep" : "";
+  return { where, params, sql: `SELECT coalesce(g, '${NONE}') AS value, count(*)::int AS n${rep} FROM (SELECT ${expr} AS g, file_id AS fid FROM ${FIND_VIEW} ${where}) x GROUP BY 1 ORDER BY 2 DESC LIMIT 500` };
 }
 
 export const EXPORT_LIMIT = 50_000;
@@ -276,7 +283,7 @@ export function parseLayout(x: unknown): ViewLayout {
 }
 
 const FILTER_KEYS = new Set([
-  ...Object.values(PICK_FILTER_KEY), "fiscal_year", "primary_only", "is_primary", "fy_range", "modified_time", "signed_date", "effective_date", "issued_date", "file_id", "document_id",
+  ...Object.values(PICK_FILTER_KEY), "fiscal_year", "primary_only", "is_primary", "fy_range", "modified_time", "signed_date", "effective_date", "issued_date", "file_id", "document_id", "location",
 ]);
 
 export function parseSpec(x: unknown): FindSpec {

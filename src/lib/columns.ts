@@ -46,6 +46,9 @@ export const COLUMN_DEFS: ColDef[] = [
   { key: "issued_date", label: "Issued date", type: "date", source: "db", sql: "issued_date", width: 110 },
   { key: "file_id", label: "File ID", type: "text", source: "db", sql: "file_id", width: 180 },
   { key: "document_id", label: "Catalog ID", type: "text", source: "db", sql: "document_id::text", width: 110 },
+  // CAT-WO-03.1: drive › folder path of the primary copy (the crawl's own path data, never a label); shown only on rows
+  // that pass the live access check, as names
+  { key: "location", label: "Location", type: "text", source: "db", sql: "location", width: 280 },
 ];
 
 export const COLUMN_BY_KEY = new Map(COLUMN_DEFS.map((c) => [c.key, c]));

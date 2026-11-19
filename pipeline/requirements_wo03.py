@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dbguard_wo03 as dbg
 
 URGENCY = {"missing": 0, "unknown": 1, "draft": 2, "final_unexecuted": 3, "final_not_issued": 3, "superseded": 3,
-           "not_satisfying_kind": 3, "partner_unconfirmed": 3, "partially_executed": 4, "none_found": 5, "met": 6,
+           "not_satisfying_kind": 3, "not_annual": 3, "partner_unconfirmed": 3, "partially_executed": 4, "none_found": 5, "met": 6,
            "not_required": 7, "no_roster": 8, "applicability_not_set": 8}
 CONF_RANK = {"confirmed": 2, "high": 1, "low": 0}
 MAX_CANDIDATES = 10
@@ -57,7 +57,14 @@ def req_key(rule_id, entity, partner, fy, q):
     return f"{rule_id}|{entity}|{partner or ''}|{fy or ''}|{('Q' + str(q)) if q else ''}"
 
 
+def is_annual(doc):
+    """CAT-WO-03.1: an annual document has the fiscal-year period or none - never a quarter"""
+    return (doc.get("period") or "fy") == "fy"
+
+
 def satisfies(doc, satisfied_when):
+    if satisfied_when.get("annual") and not is_annual(doc):
+        return False
     st = satisfied_when.get("stage")
     if st is not None:
         return doc.get("stage") in st
@@ -70,6 +77,8 @@ def satisfies(doc, satisfied_when):
 def sub_status(doc, satisfied_when, satisfying_kind):
     if not satisfying_kind:
         return "not_satisfying_kind"
+    if satisfied_when.get("annual") and not is_annual(doc):
+        return "not_annual"
     if satisfied_when.get("stage") is not None:
         s = doc.get("stage")
         return s if s in ("draft", "final_unexecuted", "partially_executed") else "unknown"
@@ -266,7 +275,7 @@ def build(cur, today, log=print):
                     if conf is None:
                         continue
                 cands.append({"document_id": d["document_id"], "file_id": d["file_id"], "kind": d["kind"], "stage": d["stage"],
-                              "status": d["status"], "is_primary": bool(d["is_primary"]), "partner_conf": conf,
+                              "status": d["status"], "period": d["period"], "is_primary": bool(d["is_primary"]), "partner_conf": conf,
                               "date": d["dt"].isoformat() if d["dt"] else None, "date_ord": d["dt"].toordinal() if d["dt"] else None,
                               "kind_satisfying": d["kind"] in sat_kinds})
             ov = overrides.get(key)
@@ -293,6 +302,7 @@ def reason(best, result, sub):
     bits = [best.get("kind") or "?"]
     if best.get("stage") and best["stage"] != "n_a": bits.append(f"stage {best['stage']}")
     if best.get("status"): bits.append(f"status {best['status']}")
+    if best.get("period") and best["period"] != "fy": bits.append(f"period {best['period']}")
     if best.get("partner_conf"): bits.append(f"partner match {best['partner_conf']}")
     if not best.get("is_primary", True): bits.append("a copy (primary not in scope)")
     return ("qualifies: " if result == "met" else f"does not qualify ({sub}): ") + ", ".join(bits)

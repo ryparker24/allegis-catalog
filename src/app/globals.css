@@ -381,3 +381,10 @@ td.gap-met { background: var(--primary-soft); } td.gap-onfile { background: var(
 td.gap button.link { color: inherit; }
 .subject-box { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
 .subject-box .opts { display: grid; gap: 6px; margin: 8px 0; }
+
+/* CAT-WO-03.1 Location */
+.loc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.loc a { color: inherit; text-decoration: underline dotted; }
+.locs { margin-top: 12px; }
+.locs ul { margin: 4px 0 0; padding-left: 16px; }
+.locs li { font-size: 12px; word-break: break-word; margin: 2px 0; }

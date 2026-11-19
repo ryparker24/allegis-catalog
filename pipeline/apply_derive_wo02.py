@@ -39,6 +39,14 @@ def run(conn, ruled=None, apply=True, log=print):
         cur.execute("""SELECT DISTINCT ON (rule_id) pattern FROM ops.decomposition_rule
                        WHERE rule_id = 'ISS-004P' AND active ORDER BY rule_id, version DESC""")
         r = cur.fetchone(); dw.set_bank_pattern(r[0] if r else None)    # NK03: the banks the catalog knows
+        # CAT-WO-03.1 audited FS: Datum legal names -> entity codes (ref.party exists from CAT-WO-03 on)
+        legal = collections.defaultdict(set)
+        cur.execute("SELECT to_regclass('ref.party') IS NOT NULL")
+        if cur.fetchone()[0]:
+            cur.execute("SELECT DISTINCT datum_company_name, entity_code FROM ref.party WHERE entity_code IS NOT NULL")
+            for nm, ent in cur.fetchall():
+                legal[dw.legal_key(nm)].add(ent)
+        afs_fy = {}
         new_kind, old_kind = {}, {}
         cur.execute("""SELECT fd.document_id, f.name, f.path_segments, f.file_type_family, d.kind_auto,
                               coalesce(d.execution_stage_confirmed, d.execution_stage_auto),
@@ -56,6 +64,13 @@ def run(conn, ruled=None, apply=True, log=print):
             if dw.schwab_issuer((segs or [])[1:], fam, issuer):
                 issuers.append(("bank", doc)); c["issuer:schwab-pdf->bank"] += 1
             if person_kind: continue                             # a person's kind is never touched
+            a = dw.afs_rule(name, (segs or [])[1:], kind, legal)
+            if a:                                                # CAT-WO-03.1: an annual report = audited FS, annual
+                rid, fy, _ent = a
+                afs_fy[doc] = fy; c[f"afs:{rid}:{kind or '(none)'}"] += 1
+                if kind != dw.AFS_KIND:
+                    new_kind[doc] = (rid, dw.AFS_KIND); old_kind[doc] = kind
+                continue
             rid, k = dw.rekind_rule(name, kind, stage, issuer)
             if not k and kind is None and ruled:
                 rid, k = dw.nokind_rule(name, (segs or [])[1:], only=ruled, family=fam)
@@ -118,16 +133,26 @@ def run(conn, ruled=None, apply=True, log=print):
         if not_exec:
             cur.executemany("""UPDATE cat.document SET requires_execution_auto=false, execution_stage_auto='n_a', updated_at=now()
                                WHERE document_id=%s AND (requires_execution_auto, execution_stage_auto) IS DISTINCT FROM (false, 'n_a')""", not_exec)
+        if afs_fy:   # audited FS: the report's fiscal year (when the name / year folder gives one) and an ANNUAL period
+            cur.executemany("""UPDATE cat.document SET fiscal_year_auto=coalesce(%s, fiscal_year_auto), fiscal_quarter_auto=NULL, fye_flag_auto=true,
+                                      updated_at=now()
+                               WHERE document_id=%s AND (fiscal_year_auto, fiscal_quarter_auto, fye_flag_auto)
+                                     IS DISTINCT FROM (coalesce(%s, fiscal_year_auto), NULL::smallint, true)""",
+                            [(fy, d, fy) for d, fy in afs_fy.items()])
         if issuers:  # issuer_auto only where nothing (machine or person) set an issuer
             cur.executemany("UPDATE cat.document SET issuer_auto=%s, updated_at=now() WHERE document_id=%s AND issuer_auto IS NULL AND issuer_confirmed IS NULL", issuers)
         cur.executemany("""UPDATE cat.document SET issuing_entity_auto=%s, receiving_entities_auto=%s, parties_rule=%s, updated_at=now()
                            WHERE document_id=%s AND (issuing_entity_auto, receiving_entities_auto, parties_rule) IS DISTINCT FROM (%s, %s, %s)""",
                         [(i, r, ru, d, i, r, ru) for i, r, ru, d in parties])
+        # CAT-WO-03.1 Location: each document's primary-copy path + how many folders hold a copy (the crawl's own data)
+        cur.execute("SELECT to_regprocedure('ops.refresh_document_location()') IS NOT NULL")
+        if cur.fetchone()[0]:
+            cur.execute("SELECT ops.refresh_document_location()"); c["locations"] = cur.fetchone()[0]
         cur.executemany("""UPDATE cat.document SET status_auto=%s, status_rule=%s, updated_at=now()
                            WHERE document_id=%s AND (status_auto, status_rule) IS DISTINCT FROM (%s, %s)""",
                         [(st, ru, d, st, ru) for st, ru, d in status])
     conn.commit()
-    log(f"APPLIED: kinds {len(kinds):,}, execution cleared {len(not_exec):,}, issuers {len(issuers):,}, parties {len(parties):,} documents, status {len(status):,}")
+    log(f"APPLIED: audited FS {len(afs_fy):,}, kinds {len(kinds):,}, execution cleared {len(not_exec):,}, issuers {len(issuers):,}, parties {len(parties):,} documents, status {len(status):,}")
     return c
 
 

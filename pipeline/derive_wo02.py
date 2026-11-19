@@ -216,6 +216,70 @@ RK4_FORMATION = W(r"(‹certificate of amendment›|‹name change›|‹de amen
                   r"‹amendment to (the )?certificate›)")
 
 
+# ------------------------------------------------------------------ CAT-WO-03.1 · audited financial statements (Ryan 2026-11-19)
+# A fund's "Annual Report" is its audited financial statements. Kind audited_financial_statements, FY = the report year,
+# period = the fiscal year (never a quarter: the "2025-Q4" folder it sits in is where it was filed, not its period).
+#   AFS-A  "<firm> <YYYY> Annual Report - <entity legal name>"                       (Ryan)
+#   AFS-B  a "_Final Reports" folder and "Annual Report" in the file name             (Ryan)
+#   AFS-C  "Annual Report" + exactly ONE Datum legal name + one year (name, else a year folder)   (default taken, Ryan
+#          approved "add shape C": the FY2024 reports are named "<legal name> ... 2024 Annual Report")
+# Never: drafts / redlines / versions, cover letters, decks, presentations, summaries. Machine kinds only, and only
+# over the report kinds the measurement found them under. Entity comes from the legal-name entity rules (ENT-0xx).
+AFS_KIND = "audited_financial_statements"
+AFS_FROM_KINDS = {None, "quarterly_report", "audit_report", "financial_statements", AFS_KIND}
+_AFS_A = re.compile(r"^(?P<firm>.+?)\s+(?P<fy>(?:19|20)\d{2})\s+annual\s+report\s*[-–—]\s*(?P<legal>.+?)(\.[a-z0-9]{2,5})?$", re.I)
+_AFS_ANNUAL = re.compile(r"\bannual\s+report\b", re.I)
+_AFS_FINAL_SEG = re.compile(r"^_?final\s+reports?$", re.I)
+_AFS_NOT = re.compile(r"\b(draft|redline[sd]?|blackline|v\d{1,2}|version|letter|cover|deck|presentation|slides|summary|highlights)\b", re.I)
+_AFS_YEAR = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
+_AFS_CIP1_EXCLUDE = re.compile(r"(\bII\b|\bIII\b|(?<![0-9])2(?![0-9]))")
+_LEGAL_SUFFIX = {"lp", "llc", "inc", "ltd", "l", "p", "c"}
+
+
+def legal_key(s):
+    """a legal name as lower-case words, punctuation dropped, trailing entity form (L.P., LLC ...) removed"""
+    t = re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).split()
+    while t and t[-1] in _LEGAL_SUFFIX:
+        t.pop()
+    return " ".join(t)
+
+
+def legal_entities(name, legal):
+    """entities whose Datum legal name appears in the name (whole words; the longest wins). CIP-I only when the name
+    has no "II", "III" or "2" (Ryan: CIP-I legal-name rule turned on with that exclusion)."""
+    n = " " + re.sub(r"[^a-z0-9]+", " ", (name or "").lower()) + " "
+    found = [lg for lg in legal if lg and f" {lg} " in n]
+    # a match nested in a longer one ("cyber innovation partners" in "... partners ii") is the longer one's; two
+    # DIFFERENT funds named in one file stay ambiguous (both returned)
+    kept = [lg for lg in found if not any(lg != o and f" {lg} " in f" {o} " for o in found)]
+    hits = set().union(*[legal[lg] for lg in kept]) if kept else set()
+    if "CIP-I" in hits and _AFS_CIP1_EXCLUDE.search(name or ""):
+        hits.discard("CIP-I")
+    return hits
+
+
+def afs_rule(name, segs, kind, legal):
+    """-> (rule_id, fiscal_year or None, entity or None) for an audited-FS report, else None.
+    segs: folder segments (drive dropped); legal: {legal_key(Datum company name): {entity codes}}."""
+    name = name or ""
+    if kind not in AFS_FROM_KINDS or not _AFS_ANNUAL.search(name) or _AFS_NOT.search(name):
+        return None
+    ents = legal_entities(name, legal)
+    ent = next(iter(ents)) if len(ents) == 1 else None
+    yrs = set(_AFS_YEAR.findall(name))
+    if len(yrs) != 1:
+        yrs = {s.strip() for s in (segs or []) if re.fullmatch(r"\s*(?:19|20)\d{2}\s*", s or "")}
+    fy = int(next(iter(yrs))) if len(yrs) == 1 else None
+    m = _AFS_A.match(name)
+    if m:
+        return "AFS-A", int(m.group("fy")), ent
+    if any(_AFS_FINAL_SEG.match((s or "").strip()) for s in (segs or [])):
+        return "AFS-B", fy, ent
+    if ent and fy:
+        return "AFS-C", fy, ent
+    return None
+
+
 def rekind_rule(name, kind, stage=None, issuer=None):
     """(rule id, new kind) when RK2 / RK3 / RK4 changes this file's kind, else (None, None)."""
     n = name or ""

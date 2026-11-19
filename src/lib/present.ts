@@ -38,6 +38,10 @@ export function present<T extends DbRow>(r: LiveRow<T>) {
     modified_time: d.modified_time ?? null,
     file_type_family: d.file_type_family ?? null,
     queue_reason: d.queue_reason ?? null,
+    // CAT-WO-03.1 Location: only rows that passed the live check reach present()
+    location: (d.location as string | null | undefined) ?? null,
+    location_folder_id: (d.location_folder_id as string | null | undefined) ?? null,
+    other_locations: (d.other_locations as number | null | undefined) ?? 0,
     requires_execution: (d.requires_execution as boolean | null | undefined) ?? null,   // Review form: Stage vs Status
     signals: d.signals ?? null,
     confidence: d.confidence ?? null,

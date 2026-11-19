@@ -7,8 +7,11 @@
 import type { Db } from "./db";
 import type { Session } from "./session";
 import { driveBatchGet, FILE_ID_RE, isTransient, type FetchLike } from "./google";
-import { decodeLabels, INCLUDE_LABELS } from "./labels";
+import { decodeLabels, INCLUDE_LABELS, SCHEMA, type LiveValues } from "./labels";
 import { logEvent } from "./log";
+import { buildEditMods, validateEdit, type EditSet } from "./edit";
+import { liveWritable, recordEvents } from "./editflow";
+import { modifyLabels } from "./google";
 
 export const RULES = [
   { id: "LP-SUB", checklist: "lp_subscriptions", title: "LP subscription agreements", subtype: "OFF-03", subject: "entity_partner" },
@@ -19,6 +22,29 @@ export const RULES = [
   { id: "PCAP-Q", checklist: "fund_level", title: "PCAP (quarterly capital statements)", subtype: null, subject: "entity_partner_quarter" },
 ] as const;
 export const RULE_IDS: readonly string[] = RULES.map((r) => r.id);
+/** the kind a linked document is labelled with, per rule (CAT-WO-03.1) */
+const LINK_KIND: Record<string, string> = {
+  "LP-SUB": "subscription_agreement", "LP-SIDE": "side_letter", "GP-COMMIT": "subscription_agreement",
+  "AUDITED-FS": "audited_financial_statements", "K1-SET": "k1", "PCAP-Q": "capital_statement",
+};
+
+/**
+ * CAT-WO-03.1 (Ryan): "This is the one" also makes the document's LABELS match the requirement, as the person:
+ * kind = the rule's kind, + the row's entity (kept with any others), fiscal year = the row's FY, and the period
+ * (annual for audited FS, the quarter for a PCAP). Only values the published labels can hold; nothing else changes.
+ */
+export function linkEdits(key: string, live: Pick<LiveValues, "entities">): EditSet {
+  const [rule, entity, , fyS, qS] = key.split("|");
+  const ch = (f: string) => (SCHEMA.doc.fields as Record<string, { choices?: Record<string, string> }>)[f]?.choices ?? {};
+  const out: EditSet = {};
+  const kind = LINK_KIND[rule];
+  if (kind && Object.hasOwn(ch("kind"), kind)) out.kind = kind;
+  if (entity && Object.hasOwn(ch("entity"), entity) && !(live.entities ?? []).includes(entity)) out.entities = [...new Set([...(live.entities ?? []), entity])].sort();
+  if (fyS) out.fiscal_year = Number(fyS);
+  const period = rule === "AUDITED-FS" ? "fy" : qS ? qS.toLowerCase() : null;
+  if (period && Object.hasOwn(ch("period"), period)) out.period = period;
+  return out;
+}
 export const RESULTS = ["missing", "on_file", "none_found", "met", "not_required", "no_roster", "applicability_not_set"] as const;
 const SORT: Record<string, string> = {
   urgency: "urgency", entity: "entity_code", partner: "partner_code", period: "fiscal_year", result: "result",
@@ -169,20 +195,35 @@ export async function overrideWrite(body: unknown, ctx: { session: Session; db: 
       return { status: 400, body: { error: "bad_input", reason: "note_names_a_partner_use_the_code" } };
   }
   if (action === "clear" && !req[0].override_action) return { status: 400, body: { error: "bad_input", reason: "nothing_to_clear" } };
-  let fileId: string | null = null, docId: string | null = null;
+  let fileId: string | null = null, docId: string | null = null, labelsWritten: string[] = [];
   if (action === "link") {
     fileId = String(o.file_id ?? "");
     if (!FILE_ID_RE.test(fileId)) return { status: 400, body: { error: "bad_input", reason: "file_id" } };
     const f = await ctx.db.rows<{ document_id: string | null }>("SELECT document_id::text AS document_id FROM app.v_find_x WHERE file_id = $1", [fileId]);
     if (!f.length) return { status: 403, body: { error: "no_access" } };       // one answer for out of scope / can't open
-    const acc = await accessFor(ctx.session.at, [fileId], ctx.fetch);
+    // the user must be able to open AND label it (the link writes its labels to match the requirement)
+    const acc = await liveWritable(ctx.session.at, [fileId], ctx.fetch);
     if (acc.expired) return { status: 401, body: { error: "signin_required", login: "/api/auth/login" } };
-    if (acc.map.get(fileId)?.state !== "ok") return { status: 403, body: { error: "no_access" } };
+    if (!acc.ok.length) return { status: 403, body: { error: acc.noAccess.length ? "no_access" : "access_check_failed" } };
     docId = f[0].document_id;
+    const set = linkEdits(key, acc.live.get(fileId) ?? { entities: [] });
+    if (Object.keys(set).length) {
+      const v = validateEdit(set);
+      if (!v.ok) return { status: 400, body: { error: "bad_input", reason: v.reason } };
+      const { labelModifications, labels } = buildEditMods(v.value, ctx.session.email);   // a person's decision on THIS file: Confirmed
+      const d = await modifyLabels(ctx.session.at, fileId, labelModifications, ctx.fetch);
+      if (d.status !== 200) {
+        logEvent("checklist_override", { outcome: "drive_refused", action, rule_id: key.split("|")[0], file_id: fileId, drive_status: d.status });
+        return { status: d.status === 401 ? 401 : d.status === 403 || d.status === 404 ? 403 : 502, body: { error: "drive_write_failed", drive_status: d.status } };
+      }
+      // the event applies the values to the catalog at once (006 trigger), as person-set
+      await recordEvents(ctx.db, [{ file_id: fileId, document_id: docId }], ctx.session.email, v.value, labels, "checklist_link");
+      labelsWritten = labels;
+    }
   }
   await ctx.db.exec(
     `INSERT INTO app.requirement_override (req_key, action, file_id, document_id, note, by_email) VALUES ($1, $2, $3, $4::bigint, $5, $6)`,
     [key, action, fileId, docId, note, ctx.session.email.toLowerCase()]);
-  logEvent("checklist_override", { outcome: "ok", action, rule_id: key.split("|")[0], file_id: fileId ?? undefined });
-  return { status: 200, body: { ok: true } };
+  logEvent("checklist_override", { outcome: "ok", action, rule_id: key.split("|")[0], file_id: fileId ?? undefined, labels: labelsWritten });
+  return { status: 200, body: { ok: true, labels: labelsWritten } };
 }

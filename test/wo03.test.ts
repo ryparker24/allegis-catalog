@@ -151,7 +151,10 @@ describe("CAT-WO-03 overrides", () => {
     expect((await overrideWrite({ req_key: KEY, action: "link", file_id: F2 }, { session, db: D, fetch: f as never })).status).toBe(403);
     expect(execs.length).toBe(0);
     expect((await overrideWrite({ req_key: KEY, action: "link", file_id: F1 }, { session, db: D, fetch: f as never })).status).toBe(200);
-    expect(execs[0].text).toContain("INSERT INTO app.requirement_override");
+    // CAT-WO-03.1: the link first labels the document to match the requirement (event, source checklist_link), then
+    // records the override; the override is always the last write
+    expect(execs.at(-1)!.text).toContain("INSERT INTO app.requirement_override");
+    expect(execs.some((e) => e.text.includes("INSERT INTO app.review_event") && JSON.stringify(e.params ?? []).includes("checklist_link"))).toBe(true);
   });
   it("a note naming a partner of that entity is refused (names live only in ref.party)", async () => {
     const { D, execs } = fakeDb((text) => text.includes("v_requirement") ? [{ override_action: null }] : text.includes("v_party") ? [{ display_name: "Zephyrine Quillfeather Trust" }] : []);

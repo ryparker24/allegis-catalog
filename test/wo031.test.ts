@@ -40,3 +40,22 @@ describe("bulk edit stays a field-level confirmation (proposal 3, CAT-WO-03.1)",
     expect(buildEditMods({ status: "issued" }, "ryan@allegiscapital.com").labels).toEqual(["exec", "review"]);
   });
 });
+
+import { linkEdits } from "@/lib/checklists";
+import { SCHEMA } from "@/lib/labels";
+describe("checklist link labels the document to match the requirement (CAT-WO-03.1)", () => {
+  const kinds = (SCHEMA.doc.fields as Record<string, { choices?: Record<string, string> }>).kind.choices ?? {};
+  it("audited FS: kind (once published), + the row's entity kept with others, the row's FY, an annual period", () => {
+    const e = linkEdits("AUDITED-FS|CIP-I||2025|", { entities: ["X"] });
+    expect(e.entities).toEqual(["CIP-I", "X"]);
+    expect(e.fiscal_year).toBe(2025);
+    expect(e.period).toBe("fy");
+    expect("kind" in e).toBe(Object.hasOwn(kinds, "audited_financial_statements"));   // never a kind the label can't hold
+  });
+  it("PCAP: the quarter; an entity already on the file is not rewritten", () => {
+    const e = linkEdits("PCAP-Q|NL-I|LP-0001|2025|Q3", { entities: ["NL-I"] });
+    expect(e.period).toBe("q3");
+    expect(e.entities).toBeUndefined();
+    expect(e.kind).toBe("capital_statement");
+  });
+});

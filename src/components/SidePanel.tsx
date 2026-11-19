@@ -2,6 +2,7 @@
 import { previewUrl, show, type Row } from "./client";
 import { maskNames, shownName } from "./bus";
 import { Icon } from "./icons";
+import { AllLocations } from "./Location";
 
 /** Drive's own preview in an iframe (Google enforces access inside it) + "Open in Drive". */
 export function SidePanel({ row, onClose, children }: { row: Row; onClose: () => void; children?: React.ReactNode }) {
@@ -22,7 +23,7 @@ export function SidePanel({ row, onClose, children }: { row: Row; onClose: () =>
           ? <div className="preview preview-masked" role="img" aria-label="Preview hidden in screenshot mode">Drive preview hidden in screenshot mode</div>
           : <iframe className="preview" src={previewUrl(row.file_id)} title="Drive preview" allow="autoplay" referrerPolicy="no-referrer" />}
         <dl className="facts">
-          {(["kind", "entities", "portcos", "fiscal_year", "period", "stage", "executed_date", "tier", "review_status"] as const).map((k) => (
+          {(["kind", "entities", "portcos", "fiscal_year", "period", "stage", "executed_date", "status", "issued_date", "issuing_entity", "receiving_entities", "tier", "review_status"] as const).map((k) => (
             <div key={k}>
               <dt>{({ entities: "entity", portcos: "portco", tier: "handling" } as Record<string, string>)[k] ?? k.replace(/_/g, " ")}</dt>
               <dd>
@@ -34,6 +35,7 @@ export function SidePanel({ row, onClose, children }: { row: Row; onClose: () =>
           <div><dt>file id</dt><dd><code>{row.file_id}</code></dd></div>
           <div><dt>catalog id</dt><dd><code>{row.document_id ?? ""}</code></dd></div>
         </dl>
+        <AllLocations fileId={row.file_id} />
         {children}
       </div>
     </aside>
