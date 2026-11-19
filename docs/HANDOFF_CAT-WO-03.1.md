@@ -188,3 +188,27 @@ Measured on main, by document (primary copy), name patterns in memory:
 2. Directory consent for the staff step (CAT-WO-03 default 3, Ryan later).
 3. Checklist views in the rail (CAT-WO-03 default 4, later).
 4. Parties Issuing at 194 / 200 choices: the next ~6 entities need a design change.
+
+## Re-sync memory (Ryan: "check the re-sync's peak memory; stream in batches")
+- **Before** (old code, full re-sync dry run, its own process, `nightly_20261119_1106_dry.log`): **peak 825 MB** (215 MB at the end).
+  - The Drive read already streamed (each batch of 100 handed over and dropped).
+  - But `resync()` held, for all 46,259 files at once, the catalog row, the read-back snapshot (machine + live values) and, in a dry run, every planned write until the end. `readback()` had the same shape, plus 46k pending state updates.
+- **Change (`9954e4c`):** read-back and re-sync work in **segments of 2,000 files**.
+  - Each segment loads its own rows and snapshots, reads its labels, plans and (with apply) writes in its own transaction, then drops them. Only counters span segments.
+  - The plan is the same as one pass. Test **G-RS1**: same plan, never more than one segment's files loaded.
+  - The runner now logs current and peak memory after every step.
+- **Measured, the part this removes** (same process, DB loads only, no Drive): all 46,259 at once **292 MB peak** (237 MB above the 55 MB baseline); in 24 segments **61 MB** (6 MB above baseline).
+- **The full "after" re-sync could not be measured end to end:** that run was stopped too.
+- **Why both runs were stopped:** Claude Code's **own** guard for its background commands stops them when the machine is critically low on memory. At the time the ThinkPad had 3.6 GB free of 31.5 GB, with another session's `tsc` holding 4.4 GB. Windows did not kill them.
+  - **The 22:00 nightly runs under Task Scheduler, outside Claude Code, so that guard cannot stop it.** The segmentation also keeps it small.
+  - Its log shows each step's peak memory, so the first full nightly gives the "after" figure.
+
+## Re-sync dry run (CAT-WO-03.1, before the period fix)
+- `nightly_20261119_1106_dry.log`: read 46,259, errors 0, person-owned skipped 16 (all period), Entity held 1.
+- **Would re-sync 1,987 files:** Issuing 1,600 · Receiving 1,604 (the K-1 parties catch-up) · Kind 196 (audited-FS conversions, P2 emails → Correspondence, P3 sheets → Financial Statements, P5) · Period 166 · Entity 155 · Effective date 34 · Workstream 18 · Issuer 17 · Status 9 (P4 Word drafts) · Subject codes 6.
+
+## Annual period for every audited-statements document (`16d9514`)
+- After the rename, **15 AUD-01 rows read "not annual"**. Their documents were audited statements with a quarter period from the "2025-Q4" folder: Ryan's 26 hand-set kinds (the derive never touches a person's kind, so it skipped their period too) and renamed KND-025 documents the name rule doesn't reach.
+- **Now:** any document whose kind ends up Audited Financial Statements (person-set or machine) gets the annual period. A person's period still wins.
+- **AUD-01 on main:** **Met 17** (was 7) · on file without a status 13 · not the satisfying kind 4 · 34 rows. Audited FS documents: 456.
+- **This changes the re-sync plan** (more Period writes). The dry run above predates it; a final dry run is needed before applying.
