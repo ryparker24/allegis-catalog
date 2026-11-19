@@ -234,3 +234,29 @@ Measured on main, by document (primary copy), name patterns in memory:
 - The 16 period changes skipped as person-owned in the earlier dry run are gone: the annual-period fix now agrees with the period those files were given by hand.
 - **STOP: Ryan approves before `--apply`.** The nightly task stays **disabled** until then: enabled, its 22:00 run would apply this.
 - **Signed-in smoke test: pending.** Neither ThinkPad Chrome connected to Claude has an app session (one shows the app's Sign-in page, the other the Cloudflare Access sign-in). Unauthenticated checks pass (302 to Access).
+
+## Apply (Ryan: "apply"), 2026-11-19
+- **Pass 1** (`nightly_20261119_1323`, `16d9514`): re-synced **1,453**, **errors 735**. Peak memory 211 MB.
+- **Pass 2** (`05304c2`, the errors now recorded by code): all 735 were **HTTP 400 badRequest** inside the 25-file write batches, whatever the field.
+  - The same writes succeed one at a time (probed on a sample).
+- **Pass 3** (`07db927`): a 400 inside a batch is retried once on its own. **694 more written**.
+- **34 still fail, alone too.** All are the **Effective date** (2025-12-31) that Ryan set by hand on some files, being copied to their documents' *other* labelled copies.
+  - Writing the effective date alone → 400 "Bad Request"; the same file's period write succeeds.
+  - The field is a normal published date field (1970–2106, canWrite) and the request body is the standard `setDateValues`. The re-sync had never written this field before.
+  - A raw-HTTP probe for Drive's full error body was blocked by the session's permission check, so the cause is **open**.
+  - The person's date stays on the copies where Ryan set it. The nightly re-sync will count these 34 as errors each night but does not stop on them.
+- **Total written: 2,147 of 2,188 planned files** (plus 7 by the error probes, which wrote the planned values).
+- **Post-checks:**
+  - live dry run on 100 random re-synced files → 0 writes pending, 0 errors;
+  - AUD-01: 34 rows, **Met 17**, on file 17;
+  - requirements 3,156; 0 documents with `audit_report`; Audited FS 456;
+  - `cat.document_location` 128,238;
+  - 0 `app` views without `security_barrier`; `catalog_app` cannot update `cat.document` and can read `app.v_nightly_status`.
+- **Nightly task ENABLED:** "Allegis Catalog nightly", next run 2026-11-19 22:00, `app-main` at the release commit.
+- **Signed-in smoke test: NOT done.** Neither ThinkPad Chrome connected to Claude in Chrome has an app session: device `e164b646…` shows the app's Sign-in page, device `376c4898…` the Cloudflare Access sign-in. Signing in is Ryan's step. Unauthenticated checks pass (302 to Access).
+- **Credentials:** the session's database-URL files were deleted from the scratchpad.
+
+## Open (CAT-WO-03.1)
+1. The 34 Effective-date writes (400). Ryan may allow one raw-HTTP probe for Drive's error body, or set those copies' dates by hand.
+2. The signed-in smoke test: Checklists, Location and grouping, locations panel, nightly banner.
+3. Follow-ups listed above (AUD-04 annual-report kind, directory consent, rail views, Parties choice limit).
