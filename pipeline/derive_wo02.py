@@ -280,6 +280,32 @@ def afs_rule(name, segs, kind, legal):
     return None
 
 
+_AUDITED_WORD = re.compile(r"\baudited\b", re.I)
+_AUDIT_KINDS = {"audit_report", AFS_KIND}
+
+
+def audit_kind_rule(name, family, kind):
+    """CAT-WO-03.1 rulings (Ryan 2026-11-19) on the audited-FS kinds, by file type. Machine kinds only.
+    -> (rule_id, kind) or (None, None).
+      P2  an EMAIL in an audit kind, or a financial-statements email named "audited" -> correspondence (the rules
+          skip email files: mail ABOUT the statements is not the statements)
+      P3  a SPREADSHEET in an audit kind -> financial_statements (workbooks stay financial statements)
+      P5  a financial_statements PDF named "audited" -> audited_financial_statements
+    P4 (Word drafts stay audited FS, Status = Draft) is afs_status()."""
+    if family == "email" and (kind in _AUDIT_KINDS or (kind == "financial_statements" and _AUDITED_WORD.search(name or ""))):
+        return "AK-P2-email", "correspondence"
+    if family == "sheet" and kind in _AUDIT_KINDS:
+        return "AK-P3-sheet", "financial_statements"
+    if family == "pdf" and kind == "financial_statements" and _AUDITED_WORD.search(name or ""):
+        return "AK-P5-audited-pdf", AFS_KIND
+    return None, None
+
+
+def afs_status(kind, family):
+    """P4: a Word document of the audited statements is a draft (Status = Draft, so it never satisfies AUD-01)."""
+    return ("draft", "AK-P4-word-draft") if kind == AFS_KIND and family == "doc" else (None, None)
+
+
 def rekind_rule(name, kind, stage=None, issuer=None):
     """(rule id, new kind) when RK2 / RK3 / RK4 changes this file's kind, else (None, None)."""
     n = name or ""

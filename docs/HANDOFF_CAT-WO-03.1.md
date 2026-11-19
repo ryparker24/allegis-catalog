@@ -173,3 +173,18 @@ Measured on main, by document (primary copy), name patterns in memory:
 - **Slip, found and fixed in the same session:** preparing the rename, I had already removed `audit_report` from the audited-FS rule's source kinds. 006b isn't applied yet, so KND-025 still sets `audit_report`, and 98 reports, the FY2024 ones among them, were no longer converted: **AUD-01 Met fell 7 → 0** in this run.
 - Restored (`audit_report` stays a source kind until 006b renames it; harmless after). Derive + checklists were re-run on main: audited FS 251, **AUD-01 Met 7**, on file without a status 11, not the satisfying kind 16.
 - The re-sync plan above was computed on the slipped state. The CAT-WO-03.1 dry run after the publish is the one that counts.
+
+## Rulings on the proposals (Ryan, 2026-11-19) and how they are applied
+- **Published:** Ryan published the Kind rename (`33143e5d03` = "Audited Financial Statements"). `--read-published` → `labels_schema.json`: `audited_financial_statements` → `33143e5d03`, `audit_report` removed.
+- **006b applied on main** (restore point `pre-catwo031b` = `br-wispy-paper-bd5rvyws` first): documents, read-back snapshot, KND-025 v2, AUD-01 renamed; **P6:** KND-005 v2 without "annual report".
+- **P2 (approved):** emails in an audit kind, or financial-statements emails named "audited" → `correspondence`. The audited-FS rule skips email and spreadsheet files (`derive_wo02.audit_kind_rule`, `AK-P2-email`). No `audit_correspondence` kind.
+- **P3 (approved):** spreadsheets in an audit kind → `financial_statements` (`AK-P3-sheet`).
+- **P4 (approved):** Word files of the audited statements stay Audited Financial Statements with **Status = Draft** (`afs_status`, `AK-P4-word-draft`).
+- **P5 (approved):** financial-statements PDFs named "audited" → Audited Financial Statements, annual period (`AK-P5-audited-pdf`).
+- Tests G-F10..G-F12 (pipeline `test_wo031` 12/12).
+
+## Follow-ups
+1. **A kind for annual LP reports / letters, mapped to Datum AUD-04** (Ryan). Then re-check the 170 "Annual Report" `quarterly_report` documents against it.
+2. Directory consent for the staff step (CAT-WO-03 default 3, Ryan later).
+3. Checklist views in the rail (CAT-WO-03 default 4, later).
+4. Parties Issuing at 194 / 200 choices: the next ~6 entities need a design change.

@@ -8,7 +8,6 @@
     "type": "selectionOptions",
     "choices": {
      "409a": "4e7438e311",
-     "audit_report": "33143e5d03",
      "bank_stmt": "c593a87e37",
      "board_consent": "58fe7ea94a",
      "board_materials": "2252bf9531",
@@ -57,7 +56,8 @@
      "regulatory_filing": "f4832a84af",
      "other": "2fedf9cc87",
      "operating_agreement": "6352b53205",
-     "operating_agreement_amendment": "69178657d0"
+     "operating_agreement_amendment": "69178657d0",
+     "audited_financial_statements": "33143e5d03"
     }
    },
    "entity": {

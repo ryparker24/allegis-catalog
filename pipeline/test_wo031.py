@@ -45,5 +45,17 @@ subs = rq.subjects(RULE, {}, [{"entity": "FUND-A", "partner": "LP-0001", "ckind"
 fa = sorted(x[2] for x in subs if x[0] == "FUND-A"); fb = sorted(x[2] for x in subs if x[0] == "FUND-B")
 check("G-F9 requirement years start at the entity's first year (earliest roster commitment), never before; no roster date = the rule's start",
       fa == [2023, 2024, 2025] and fb == [2022, 2023, 2024, 2025], f"{fa} {fb}")
+K = dw.audit_kind_rule
+check("G-F10 P2: emails in an audit kind (or FS emails named 'audited') -> correspondence; the audited-FS rule never sees them",
+      K("RE: audited financial statements", "email", "audit_report") == ("AK-P2-email", "correspondence")
+      and K("FW: Audited FS 2024", "email", "financial_statements") == ("AK-P2-email", "correspondence")
+      and K("FW: monthly financials", "email", "financial_statements") == (None, None))
+check("G-F11 P3: spreadsheets in an audit kind -> financial_statements; P5: FS PDFs named 'audited' -> audited FS",
+      K("Audited FS workbook.xlsx", "sheet", "audited_financial_statements") == ("AK-P3-sheet", "financial_statements")
+      and K("Audited Financial Statements 2023.pdf", "pdf", "financial_statements") == ("AK-P5-audited-pdf", "audited_financial_statements")
+      and K("Financial Statements Q2.pdf", "pdf", "financial_statements") == (None, None))
+check("G-F12 P4: a Word file of the audited statements is Status = Draft; a PDF is not",
+      dw.afs_status("audited_financial_statements", "doc") == ("draft", "AK-P4-word-draft")
+      and dw.afs_status("audited_financial_statements", "pdf") == (None, None))
 print(f"\n{sum(R)}/{len(R)} passed")
 sys.exit(0 if all(R) else 1)

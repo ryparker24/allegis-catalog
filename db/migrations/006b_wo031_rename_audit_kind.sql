@@ -25,6 +25,15 @@ FROM ops.decomposition_rule WHERE rule_id = 'KND-025' AND version = 1
 ON CONFLICT (rule_id, version) DO NOTHING;
 UPDATE ops.decomposition_rule SET active = false WHERE rule_id = 'KND-025' AND version = 1 AND active;
 
+-- P6 (Ryan): "annual report" no longer sends a file to quarterly_report (the audited-FS rule decides annual reports;
+-- annual LP letters get their own kind later, Datum AUD-04 - follow-up)
+INSERT INTO ops.decomposition_rule (rule_id, version, field, applies_to, pattern, value, priority, active, notes, multi, provisional)
+SELECT rule_id, 2, field, applies_to, '(?i)quarterly report|\yQ[1-4] (LP )?report|investor letter|LP letter', value, priority, true,
+       'CAT-WO-03.1 P6 (Ryan): "annual report" removed', multi, provisional
+FROM ops.decomposition_rule WHERE rule_id = 'KND-005' AND version = 1
+ON CONFLICT (rule_id, version) DO NOTHING;
+UPDATE ops.decomposition_rule SET active = false WHERE rule_id = 'KND-005' AND version = 1 AND active;
+
 -- AUD-01: the old candidate row goes (audited_financial_statements is already the one satisfying kind, from 006)
 DELETE FROM ref.doc_subtype_kind WHERE subtype_code = 'AUD-01' AND kind = 'audit_report';
 

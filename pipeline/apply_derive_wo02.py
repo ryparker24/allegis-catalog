@@ -64,12 +64,20 @@ def run(conn, ruled=None, apply=True, log=print):
             if dw.schwab_issuer((segs or [])[1:], fam, issuer):
                 issuers.append(("bank", doc)); c["issuer:schwab-pdf->bank"] += 1
             if person_kind: continue                             # a person's kind is never touched
-            a = dw.afs_rule(name, (segs or [])[1:], kind, legal)
-            if a:                                                # CAT-WO-03.1: an annual report = audited FS, annual
+            # CAT-WO-03.1 (Ryan): email / spreadsheet files are never the audited statements (the rules skip them)
+            a = dw.afs_rule(name, (segs or [])[1:], kind, legal) if fam not in ("email", "sheet") else None
+            if a:                                                # an annual report = audited FS, annual
                 rid, fy, _ent = a
                 afs_fy[doc] = fy; c[f"afs:{rid}:{kind or '(none)'}"] += 1
                 if kind != dw.AFS_KIND:
                     new_kind[doc] = (rid, dw.AFS_KIND); old_kind[doc] = kind
+                continue
+            rid, k = dw.audit_kind_rule(name, fam, kind)         # P2 emails -> correspondence, P3 sheets -> FS, P5 audited PDFs -> AFS
+            if k:
+                c[f"kind:{rid}:{kind or '(none)'}->{k}"] += 1
+                if k == dw.AFS_KIND: afs_fy[doc] = None          # audited statements are annual (FY kept)
+                if k != kind:
+                    new_kind[doc] = (rid, k); old_kind[doc] = kind
                 continue
             rid, k = dw.rekind_rule(name, kind, stage, issuer)
             if not k and kind is None and ruled:
@@ -107,6 +115,8 @@ def run(conn, ruled=None, apply=True, log=print):
                 iss, recv, rule = None, [], None          # no longer a K-1: rule-set parties are cleared
             parties.append((iss, recv or None, rule, doc))
             st, srule = dw.status_for(kind, bool(req) or kind in executable, name, (segs or [])[1:], stage)
+            d_st, d_rule = dw.afs_status(kind, fam)               # P4: a Word file of the audited statements is a draft
+            if d_st: st, srule = d_st, d_rule
             status.append((st, srule, doc)); c[f"status:{st or '-'}"] += 1
         # CAT-WO-03 default (Ryan's K1-R2 question): a GP RECEIVES one or a few K-1s a year from its fund. More than
         # K1R2_MAX "received" K-1s for one GP and fiscal year are K-1s the GP issued to its members (or a mixed folder),
