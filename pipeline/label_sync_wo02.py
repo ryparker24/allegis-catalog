@@ -182,7 +182,9 @@ def readback(connect, svc, schema, apply=False, ids=None, log=print):
             by_field.update(new)
             doc = (rows.get(fid) or {}).get("document_id")
             if doc is not None:
-                confirms += confirm_updates(doc, new, d)
+                # .extend, not +=: += inside this nested function made `confirms` local and crashed the first
+                # read-back that met a person's edit (2026-11-19, CAT-WO-03.1 hotfix)
+                confirms.extend(confirm_updates(doc, new, d))
         upd_state.append((fid, json.dumps(machine, default=str), json.dumps(live_codes, default=str), d["review_status"], d["reviewed_by_set"],
                           sorted(set(st.get("person_fields") or []) | set(owned))))
 

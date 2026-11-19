@@ -148,5 +148,31 @@ check("G-D14 RK2-RK4 re-kinds: operating agreement (amendment), template unless 
       and dw.rekind_rule("Certificate of Amendment", "legal_agreement") == ("RK4", "formation_filing")
       and dw.rekind_rule("Certificate of Amendment", "tax_form") == (None, None))
 
+# ---------------------------------------------------------------- read-back end to end with a person's edit (hotfix 2026-11-19)
+class _Cur:
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+class _Conn(_Cur):
+    def cursor(self): return _Cur()
+class _Schema:
+    def active_fields(self): return ["status", "kind"]
+    def include_labels(self): return "x"
+    def decode(self, info):
+        return {"has_doc_label": True, "tier": "normal", "unknown_choices": 0, "dropped_subject_text": 0, "status": "issued",
+                "kind": "financial_statements", "review_status": None, "reviewed_by_set": False}
+_saved = (ls.load_state, cl.catalog_rows, cl.read_labels)
+try:
+    ls.load_state = lambda cur, ids: {"F1": {"machine": {"status": "final", "kind": "financial_statements"}, "live": {}, "person_fields": []}}
+    cl.catalog_rows = lambda cur, ids: {"F1": {"document_id": 7}}
+    cl.read_labels = lambda svc, ids, inc, on_item=None: on_item("F1", {"http": 200, "labelInfo": {}})
+    try:
+        rep = ls.readback(lambda: _Conn(), None, _Schema(), apply=False, ids=["F1"], log=lambda *a: None)
+        ok, detail = rep["confirmed_by_person"] == 1 and rep["by_field"] == {"status": 1}, str(rep.get("by_field"))
+    except Exception as e:
+        ok, detail = False, type(e).__name__ + ": " + str(e)
+finally:
+    ls.load_state, cl.catalog_rows, cl.read_labels = _saved
+check("G-RB1 read-back with a person's edit (Status Final -> Issued) is counted and queued, never crashes", ok, detail)
+
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)
