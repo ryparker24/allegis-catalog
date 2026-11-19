@@ -255,6 +255,7 @@ def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.s
     skipped_by_field, write_by_field = collections.Counter(), collections.Counter()
     n_plans, rid, sampled, changed_mtime = 0, None, 0, 0
     tries = collections.Counter()   # retry cap per file (coder review): a persistent 429 can't loop forever
+    err_detail = collections.Counter()   # write errors by status : reason : fields (codes only)
     if apply:
         conn = connect()
         with conn.cursor() as cur:
@@ -340,6 +341,13 @@ def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.s
                         if item not in retry: retry.append(item)
                     else:
                         rep["errors"] += 1
+                        # codes only (HTTP status, Drive's reason code, the fields being written): never a message or name
+                        reason = ""
+                        try:
+                            reason = (json.loads(getattr(exc, "content", b"{}") or b"{}").get("error", {}).get("errors") or [{}])[0].get("reason", "")
+                        except Exception:
+                            pass
+                        err_detail[f"{st}:{reason or '?'}:{'+'.join(sorted(item[1]))}"] += 1
 
                 b = svc.new_batch_http_request(callback=cb)
                 for i, (fid, write, e) in enumerate(chunk):
@@ -371,6 +379,7 @@ def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.s
         return rep
     rep["notes"] = f"modifiedTime changed on {changed_mtime} of {sampled} sampled files; never read back (not touched) {rep['no_state']:,}"
     rep["by_field"]["mtime_sampled"] = sampled
+    rep["by_field"]["write_errors"] = dict(err_detail.most_common(30))
     rep["by_field"]["mtime_changed"] = changed_mtime
     conn = connect()
     with conn.cursor() as cur:
