@@ -2,7 +2,6 @@
 export const VOCAB = {
   "kind": {
     "409a": "409A Valuation",
-    "audit_report": "Audit Report",
     "audited_financial_statements": "Audited Financial Statements",
     "bank_stmt": "Bank Statement",
     "board_consent": "Board Consent",

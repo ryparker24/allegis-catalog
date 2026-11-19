@@ -226,7 +226,7 @@ RK4_FORMATION = W(r"(‹certificate of amendment›|‹name change›|‹de amen
 # Never: drafts / redlines / versions, cover letters, decks, presentations, summaries. Machine kinds only, and only
 # over the report kinds the measurement found them under. Entity comes from the legal-name entity rules (ENT-0xx).
 AFS_KIND = "audited_financial_statements"
-AFS_FROM_KINDS = {None, "quarterly_report", "audit_report", "financial_statements", AFS_KIND}
+AFS_FROM_KINDS = {None, "quarterly_report", "financial_statements", AFS_KIND}   # audit_report was renamed AFS (006b)
 _AFS_A = re.compile(r"^(?P<firm>.+?)\s+(?P<fy>(?:19|20)\d{2})\s+annual\s+report\s*[-–—]\s*(?P<legal>.+?)(\.[a-z0-9]{2,5})?$", re.I)
 _AFS_ANNUAL = re.compile(r"\bannual\s+report\b", re.I)
 _AFS_FINAL_SEG = re.compile(r"^_?final\s+reports?$", re.I)

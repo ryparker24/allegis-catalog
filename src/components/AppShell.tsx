@@ -9,10 +9,24 @@ import { useOutside, ViewTree } from "./ViewTree";
 const COLLAPSE_KEY = "catalog.sidebarCollapsed";
 
 /** Item 1: Datum-style shell. Dark rail (brand, nav, saved-view tree) + dark top bar (search, Labels, avatar). */
+type Nightly = { status: string; failed_step: string | null; started_at: string | null; last_ok_at: string | null };
+/** CAT-WO-03.1: a banner when the nightly run failed, or no run succeeded in 36 hours (labels and checklists go stale). */
+export function nightlyBanner(n: Nightly | null): React.ReactNode {
+  if (!n) return null;
+  const lastOk = n.last_ok_at ? new Date(n.last_ok_at.replace(" ", "T")) : null;
+  const stale = !lastOk || Date.now() - lastOk.getTime() > 36 * 3600 * 1000;
+  if (n.status === "failed")
+    return <div className="banner warn" role="status">The nightly catalog run failed at step <b>{n.failed_step ?? "?"}</b> ({String(n.started_at ?? "").slice(0, 16)}). The log is in C:\DriveCatalog\logs on the ThinkPad.</div>;
+  if (stale && n.status !== "running")
+    return <div className="banner warn" role="status">{lastOk ? <>No successful nightly catalog run since {String(n.last_ok_at).slice(0, 16)}.</> : <>The nightly catalog run has not completed yet.</>} Filters, checklists and labels may be behind Drive.</div>;
+  return null;
+}
+
 export function AppShell({ email, active, signedIn, children }: { email: string | null; active: "find" | "review" | "checklists"; signedIn: boolean; children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState<number | null>(null);
+  const [nightly, setNightly] = useState<Nightly | null>(null);
   const [q, setQ] = useState("");
   const [userMenu, setUserMenu] = useState(false);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -23,7 +37,7 @@ export function AppShell({ email, active, signedIn, children }: { email: string 
   useEffect(() => {
     try { setCollapsed(localStorage.getItem(COLLAPSE_KEY) === "1"); } catch { /* ignore */ }
     try { setQ(new URLSearchParams(window.location.search).get("q") ?? ""); } catch { /* ignore */ }
-    if (signedIn) api<{ reviewOpen: number }>("/api/nav").then((r) => setReviewOpen(r.reviewOpen)).catch(() => {});
+    if (signedIn) api<{ reviewOpen: number; nightly?: Nightly | null }>("/api/nav").then((r) => { setReviewOpen(r.reviewOpen); setNightly(r.nightly ?? null); }).catch(() => {});
     const k = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
@@ -102,7 +116,7 @@ export function AppShell({ email, active, signedIn, children }: { email: string 
             ) : null}
           </div>
         </header>
-        <main className="main">{children}</main>
+        <main className="main">{nightlyBanner(nightly)}{children}</main>
       </div>
       {labelsOpen ? <LabelsPanel onClose={() => { setLabelsOpen(false); labelsBtn.current?.focus(); }} /> : null}
     </div>

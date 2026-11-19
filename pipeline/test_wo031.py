@@ -18,7 +18,7 @@ check("G-F2 CIP-I never with II / III / 2 (that is CIP-II)",
       and "CIP-I" not in dw.legal_entities("Cyber Innovation Partners III Annual Report 2024", legal)
       and "CIP-I" not in dw.legal_entities("Cyber Innovation Partners 2 Annual Report", legal))
 check("G-F3 shape B: a '_Final Reports' folder + 'Annual Report'; FY from the year folder when the name has none",
-      A("Annual Report.pdf", ["00-All Reports", "2024", "2024-Q4", "_Final Reports"], "audit_report", legal) == ("AFS-B", 2024, None))
+      A("Annual Report.pdf", ["00-All Reports", "2024", "2024-Q4", "_Final Reports"], "audited_financial_statements", legal) == ("AFS-B", 2024, None))
 check("G-F4 shape C: 'Annual Report' + one legal name + one year (the FY2024 naming)",
       A("Allegis Capital X 2024 Annual Report.pdf", ["Reports"], "quarterly_report", legal) == ("AFS-C", 2024, "X"))
 check("G-F5 never drafts / redlines / versions / letters / decks",
@@ -37,5 +37,13 @@ fy = {"kind": "audited_financial_statements", "status": "issued", "period": "fy"
 none = {"kind": "audited_financial_statements", "status": "final", "period": None}
 check("G-F8 AUD-01 v2: an annual period (fy or none) qualifies; a quarter never does (sub-status not_annual)",
       rq.satisfies(fy, sw) and rq.satisfies(none, sw) and not rq.satisfies(q4, sw) and rq.sub_status(q4, sw, True) == "not_annual")
+import datetime
+RULE = {"rule_id": "AUDITED-FS", "subtype_code": "AUD-01", "subject_type": "entity_fy", "period_from": 2022,
+        "entity_filter": {"company_kind": ["fund"]}, "partner_filter": None}
+subs = rq.subjects(RULE, {}, [{"entity": "FUND-A", "partner": "LP-0001", "ckind": "fund", "interest": "capital", "is_gp": False}],
+                   {"FUND-A": "fund", "FUND-B": "fund"}, datetime.date(2026, 11, 19), {"FUND-A": 2023})
+fa = sorted(x[2] for x in subs if x[0] == "FUND-A"); fb = sorted(x[2] for x in subs if x[0] == "FUND-B")
+check("G-F9 requirement years start at the entity's first year (earliest roster commitment), never before; no roster date = the rule's start",
+      fa == [2023, 2024, 2025] and fb == [2022, 2023, 2024, 2025], f"{fa} {fb}")
 print(f"\n{sum(R)}/{len(R)} passed")
 sys.exit(0 if all(R) else 1)

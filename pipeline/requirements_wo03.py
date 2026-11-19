@@ -163,11 +163,19 @@ def load(cur):
     cur.execute(DOCS_SQL, (kinds,))
     docs = [dict(zip(["document_id", "file_id", "kind", "entities", "issuing", "fy", "period", "stage", "status", "is_primary", "dt"], r))
             for r in cur.fetchall()]
-    return rules, sk, app, party, etype, dparty, wrong, overrides, docs
+    # Ryan 2026-11-19: requirement years start at each entity's FIRST year (earliest commitment date in the Datum roster
+    # export), never before. An entity with no roster commitment dates keeps the rule's own start year.
+    cur.execute("""SELECT entity_code, min(extract(year FROM commitment_date))::int FROM ref.party
+                   WHERE entity_code IS NOT NULL AND commitment_date IS NOT NULL GROUP BY 1""")
+    party_first = dict(cur.fetchall())
+    return rules, sk, app, party, etype, dparty, wrong, overrides, docs, party_first
 
 
-def subjects(rule, app, party, etype, today):
-    """-> [(entity, partner|None, fy, q, preset_result|None)]"""
+def subjects(rule, app, party, etype, today, first_fy=None):
+    """-> [(entity, partner|None, fy, q, preset_result|None)]. first_fy: {entity: first year}; no period before it."""
+    first_fy = first_fy or {}
+    def started(e, fy):
+        return fy is None or e not in first_fy or fy >= first_fy[e]
     ef, pf = rule["entity_filter"] or {}, rule["partner_filter"] or {}
     kinds = set(ef.get("company_kind") or [])
     plus_app = set(ef.get("plus_applicability") or [])
@@ -206,6 +214,8 @@ def subjects(rule, app, party, etype, today):
         if ok is False:
             continue
         for fy, q in pers:
+            if not started(e, fy):
+                continue
             if ok == "applicability_not_set":
                 out.append((e, None, fy, q, ok)); continue
             if not per_partner:
@@ -236,7 +246,7 @@ def subjects(rule, app, party, etype, today):
 
 
 def build(cur, today, log=print):
-    rules, sk, app, party, etype, dparty, wrong, overrides, docs = load(cur)
+    rules, sk, app, party, etype, dparty, wrong, overrides, docs, first_fy = load(cur)
     by_entity = collections.defaultdict(list)
     for d in docs:
         if d["document_id"] in wrong:
@@ -252,7 +262,7 @@ def build(cur, today, log=print):
         cand_kinds = sat_kinds | {k for k, role in sk.get(rule["subtype_code"] or "", {}).items() if role == "candidate"}
         sw = rule["satisfied_when"] or {}
         no_cand = "none_found" if sw.get("no_candidate_result") == "none_found" else "missing"
-        for e, p, fy, q, preset in subjects(rule, app, party, etype, today):
+        for e, p, fy, q, preset in subjects(rule, app, party, etype, today, first_fy):
             key = req_key(rule["rule_id"], e, p, fy, q)
             base = dict(req_key=key, rule_id=rule["rule_id"], rule_version=rule["version"], checklist=rule["checklist"],
                         subtype_code=rule["subtype_code"], subject_type=rule["subject_type"], entity_code=e, partner_code=p,

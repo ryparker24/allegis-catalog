@@ -388,3 +388,7 @@ td.gap button.link { color: inherit; }
 .locs { margin-top: 12px; }
 .locs ul { margin: 4px 0 0; padding-left: 16px; }
 .locs li { font-size: 12px; word-break: break-word; margin: 2px 0; }
+.banner { margin: 0 0 12px; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+.banner.warn { background: #fff4e5; color: #6b3e00; border: 1px solid #f0c27a; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .banner.warn { background: #3a2a10; color: #ffd9a0; border-color: #7a5a20; } }
+:root[data-theme="dark"] .banner.warn { background: #3a2a10; color: #ffd9a0; border-color: #7a5a20; }
