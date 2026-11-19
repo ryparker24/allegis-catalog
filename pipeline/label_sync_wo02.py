@@ -329,9 +329,9 @@ def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.s
                     continue
                 smp = chunk[0][0]
                 before = svc.files().get(fileId=smp, fields="modifiedTime", supportsAllDrives=True).execute().get("modifiedTime")
-                retry, ok = [], []
+                retry, ok, single = [], [], []
 
-                def cb(req_id, resp, exc, _c=chunk, ok=ok, retry=retry):
+                def cb(req_id, resp, exc, _c=chunk, ok=ok, retry=retry, single=single):
                     item = _c[int(req_id)]
                     if exc is None:
                         ok.append(item); return
@@ -339,6 +339,8 @@ def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.s
                     if (st in (429, 500, 502, 503) or (st == 403 and "rate" in str(exc).lower())) and tries[item[0]] < 4:
                         tries[item[0]] += 1
                         if item not in retry: retry.append(item)
+                    elif st == 400:
+                        single.append(item)      # a 400 inside a batch: retried ON ITS OWN below (CAT-WO-03.1)
                     else:
                         rep["errors"] += 1
                         # codes only (HTTP status, Drive's reason code, the fields being written): never a message or name
@@ -354,6 +356,24 @@ def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.s
                     mods = mods_for([f for f in write if f != "_handling"], e, schema) + (handling_mods(e.get("_handling_raise"), schema) if "_handling" in write else [])
                     b.add(svc.files().modifyLabels(fileId=fid, body={"labelModifications": mods}), request_id=str(i))
                 b.execute()
+                # CAT-WO-03.1: 735 writes failed with 400 inside 25-file batches although the same writes succeed one at a
+                # time; each such item is sent once more on its own, and only a failure there counts as an error
+                for item in single:
+                    fid, write, e = item
+                    mods = mods_for([f for f in write if f != "_handling"], e, schema) + (handling_mods(e.get("_handling_raise"), schema) if "_handling" in write else [])
+                    try:
+                        svc.files().modifyLabels(fileId=fid, body={"labelModifications": mods}).execute()
+                        ok.append(item); rep["single_retry_ok"] = rep.get("single_retry_ok", 0) + 1
+                    except Exception as exc:
+                        rep["errors"] += 1
+                        st = getattr(getattr(exc, "resp", None), "status", 0) or getattr(exc, "status_code", 0)
+                        reason = ""
+                        try:
+                            reason = (json.loads(getattr(exc, "content", b"{}") or b"{}").get("error", {}).get("errors") or [{}])[0].get("reason", "")
+                        except Exception:
+                            pass
+                        err_detail[f"single:{st}:{reason or '?'}:{'+'.join(sorted(write))}"] += 1
+                    sleep(0.2)
                 after = svc.files().get(fileId=smp, fields="modifiedTime", supportsAllDrives=True).execute().get("modifiedTime")
                 sampled += 1; changed_mtime += before != after
                 with conn.cursor() as cur:
