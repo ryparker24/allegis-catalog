@@ -158,3 +158,18 @@ Measured on main, by document (primary copy), name patterns in memory:
 - **P4 · Word documents (31 + 29):** drafts of the statements / annual reports. Keep them **Audited Financial Statements** with Status = **Draft**; they never satisfy AUD-01, which needs Final / Issued.
 - **P5 · `financial_statements` PDFs named "audited" (45):** move to **Audited Financial Statements**.
 - **P6 · rule hygiene:** drop "annual report" from KND-005 (it still sends annual reports to `quarterly_report` before the audited-FS rule corrects them). The 170 "Annual Report" `quarterly_report` documents the rule doesn't reach stay as they are until named or linked by hand.
+
+## Nightly, run once by hand as a dry run (2026-11-19 09:12, code `84a2c56`, re-sync without `--apply`)
+`C:\DriveCatalog\logs\nightly_20261119_0912_dry.log`: **NIGHTLY OK**, every step passed, 49 min.
+
+| step | time | result |
+|---|---:|---|
+| crawl | 61 s | first crawl since Nov 15: new 211, changed 2,484, removed 496; live 202,248 |
+| derive | 236 s | audited FS 153 (see the slip below), parties / status for 39,190 documents |
+| readback | 1,341 s | read 46,431, errors 0, 0 new person edits |
+| resync (dry) | 1,269 s | would re-sync 1,911 files: Issuing 1,600 / Receiving 1,604 (the K-1 parties catch-up), Entity 155, Period 148 (audited FS → annual), Effective date 34, Issuer 21, Workstream 18, Subject codes 6, Kind 3, Status 3, FY 1; 16 period changes skipped as person-owned; errors 0 |
+| checklists | 48 s | 3,156 requirements (the first-year rule removed 7) |
+
+- **Slip, found and fixed in the same session:** preparing the rename, I had already removed `audit_report` from the audited-FS rule's source kinds. 006b isn't applied yet, so KND-025 still sets `audit_report`, and 98 reports, the FY2024 ones among them, were no longer converted: **AUD-01 Met fell 7 → 0** in this run.
+- Restored (`audit_report` stays a source kind until 006b renames it; harmless after). Derive + checklists were re-run on main: audited FS 251, **AUD-01 Met 7**, on file without a status 11, not the satisfying kind 16.
+- The re-sync plan above was computed on the slipped state. The CAT-WO-03.1 dry run after the publish is the one that counts.
