@@ -105,13 +105,32 @@ export function decodeLabels(info: LabelInfo): LiveValues {
 }
 
 /** Fields compared DB vs live; differing ones get the "changed in Drive" marker. */
-export const COMPARED = ["kind", "entities", "portcos", "fiscal_year", "period", "workstream", "issuer", "stage", "tier"] as const;
+export const COMPARED = ["kind", "entities", "portcos", "fiscal_year", "period", "workstream", "issuer", "stage", "tier",
+  // CAT-WO-03.1: Status & Execution, Parties and Subject too (Ryan: the "changed in Drive" marker never showed on Status)
+  "status", "issued_date", "issuing_entity", "receiving_entities", "subject_codes", "subject_person"] as const;
 export type Compared = (typeof COMPARED)[number];
+/** label + field each later-published value lives on: compared only once that field is published */
+const COMPARED_FIELD: Partial<Record<Compared, [string, string]>> = {
+  status: ["exec", "status"], issued_date: ["exec", "issued_date"], issuing_entity: ["parties", "issuing_entity"],
+  receiving_entities: ["parties", "receiving_entities"], subject_codes: ["parties", "subject_codes"], subject_person: ["parties", "subject_person"],
+};
+
+/** one comparable string: arrays sorted, dates as YYYY-MM-DD (the DB driver may give a Date), empty = "" */
+function normCmp(x: unknown): string {
+  if (Array.isArray(x)) return [...x].map(String).sort().join("|");
+  if (x == null || x === "") return "";
+  if (x instanceof Date) return isNaN(x.getTime()) ? "" : x.toISOString().slice(0, 10);
+  const s = String(x);
+  return /^\d{4}-\d{2}-\d{2}([T ]|$)/.test(s) ? s.slice(0, 10) : s;
+}
 
 export function changedFields(db: Partial<Record<Compared, unknown>>, live: LiveValues): Compared[] {
-  const norm = (x: unknown) => (Array.isArray(x) ? [...x].map(String).sort().join("|") : x == null || x === "" ? "" : String(x));
+  const norm = normCmp;
   const out: Compared[] = [];
   for (const k of COMPARED) {
+    const pub = COMPARED_FIELD[k];
+    if (pub && (!live.has_doc_label || !hasField(pub[0], pub[1]))) continue;   // unlabelled / unpublished: nothing to compare
+    if (pub && !(k in db)) continue;                                            // a view that doesn't select it (e.g. Review): no false marker
     let dbv = db[k];
     // the labelling run writes no Execution label for stage "unknown" / not-executable documents
     if (k === "stage" && (dbv === "unknown" || dbv === "n_a")) dbv = live.stage === "n_a" ? "n_a" : null;

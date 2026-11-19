@@ -374,7 +374,7 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
                     {COLS.map((x) => (
                       <td key={x.key} className={x.key === "why" ? "why" : x.key === "name" ? "name" : undefined} title={x.key === "why" || x.key === "name" ? String(cell(r, x.key)) : undefined}>
                         {cell(r, x.key)}
-                        {x.key === "stage" && r.changed.includes("stage") ? <span className="chg">changed in Drive</span> : null}
+                        {(r.changed as string[]).includes(x.key) ? <span className="chg" title={`Catalog DB: ${String((r.catalog as Record<string, unknown>)[x.key] ?? "") || "(empty)"}`}>changed in Drive</span> : null}
                       </td>
                     ))}
                   </tr>
