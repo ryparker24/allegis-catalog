@@ -50,7 +50,7 @@ def run(conn, ruled=None, apply=True, log=print):
         new_kind, old_kind = {}, {}
         cur.execute("""SELECT fd.document_id, f.name, f.path_segments, f.file_type_family, d.kind_auto,
                               coalesce(d.execution_stage_confirmed, d.execution_stage_auto),
-                              coalesce(d.issuer_confirmed, d.issuer_auto), d.kind_confirmed IS NOT NULL
+                              coalesce(d.issuer_confirmed, d.issuer_auto), d.kind_confirmed
                        FROM cat.file f JOIN cat.file_document fd ON fd.file_id = f.file_id
                        JOIN cat.document d ON d.document_id = fd.document_id
                        WHERE f.removed_run IS NULL AND f.trashed IS NOT TRUE AND f.is_shortcut IS NOT TRUE
@@ -63,7 +63,9 @@ def run(conn, ruled=None, apply=True, log=print):
             seen_doc.add(doc)
             if dw.schwab_issuer((segs or [])[1:], fam, issuer):
                 issuers.append(("bank", doc)); c["issuer:schwab-pdf->bank"] += 1
-            if person_kind: continue                             # a person's kind is never touched
+            if person_kind:                                      # a person's kind is never touched ...
+                if person_kind == dw.AFS_KIND: afs_fy[doc] = None    # ... but audited statements are annual (FY kept)
+                continue
             # CAT-WO-03.1 (Ryan): email / spreadsheet files are never the audited statements (the rules skip them)
             a = dw.afs_rule(name, (segs or [])[1:], kind, legal) if fam not in ("email", "sheet") else None
             if a:                                                # an annual report = audited FS, annual
@@ -84,6 +86,8 @@ def run(conn, ruled=None, apply=True, log=print):
                 rid, k = dw.nokind_rule(name, (segs or [])[1:], only=ruled, family=fam)
             if k and k != kind:
                 new_kind[doc] = (rid, k); old_kind[doc] = kind; c[f"kind:{rid}:{kind or '(none)'}->{k}"] += 1
+            if new_kind.get(doc, (None, kind))[1] == dw.AFS_KIND:  # e.g. KND-025: audited statements are annual
+                afs_fy.setdefault(doc, None)
         kinds = [(k, d, k) for d, (rid, k) in new_kind.items()]
         # a re-kind from an executable kind to a non-executable one (e.g. subscription_agreement -> template,
         # legal_agreement -> formation_filing) also stops being "requires execution": Stage n_a, Status applies
