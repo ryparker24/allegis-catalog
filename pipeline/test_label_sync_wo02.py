@@ -174,5 +174,38 @@ finally:
     ls.load_state, cl.catalog_rows, cl.read_labels = _saved
 check("G-RB1 read-back with a person's edit (Status Final -> Issued) is counted and queued, never crashes", ok, detail)
 
+# ---------------------------------------------------------------- re-sync in segments (CAT-WO-03.1: memory stays flat)
+class _Cur2(_Cur):
+    def execute(self, *a): pass
+    def fetchone(self): return (True,)
+class _Conn2(_Conn):
+    def cursor(self): return _Cur2()
+    def commit(self): pass
+    def close(self): pass
+class _Schema2(_Schema):
+    def decode(self, info):
+        return {"has_doc_label": True, "tier": "normal", "status": info.get("s")}
+_ids = [f"F{i}" for i in range(5)]
+_loaded = []
+_saved2 = (ls.load_state, cl.catalog_rows, cl.read_labels, ls.plan_resync, cl.expected, cl.handling_raise)
+try:
+    ls.load_state = lambda cur, ids: (_loaded.append(len(ids)), {i: {"machine": {"status": "final"}, "person_fields": []} for i in ids})[1]
+    cl.catalog_rows = lambda cur, ids: {i: {"document_id": 1} for i in ids}
+    cl.read_labels = lambda svc, ids, inc, on_item=None: [on_item(i, {"http": 200, "labelInfo": {"s": "final"}}) for i in ids]
+    ls.plan_resync = lambda e, d, m, p, f: ((["status"], []) if True else ([], []))
+    cl.expected = lambda row, schema: {}
+    cl.handling_raise = lambda e, d, schema: None
+    r_small = ls.resync(lambda: _Conn2(), None, _Schema2(), apply=False, only=_ids, log=lambda *a: None, segment=2)
+    small_loads = list(_loaded); _loaded.clear()
+    r_big = ls.resync(lambda: _Conn2(), None, _Schema2(), apply=False, only=_ids, log=lambda *a: None, segment=1000)
+    ok2 = (r_small["read"] == r_big["read"] == 5 and r_small["notes"] == r_big["notes"] == "would re-sync 5 files"
+           and r_small["by_field"] == r_big["by_field"] and max(small_loads) <= 2 and len(small_loads) == 3)
+    det = f"{r_small.get('notes')} / {r_big.get('notes')} / loads {small_loads}"
+except Exception as e:
+    ok2, det = False, type(e).__name__ + ": " + str(e)
+finally:
+    ls.load_state, cl.catalog_rows, cl.read_labels, ls.plan_resync, cl.expected, cl.handling_raise = _saved2
+check("G-RS1 re-sync in segments: same plan as one pass; never more than one segment's files loaded at once", ok2, det)
+
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

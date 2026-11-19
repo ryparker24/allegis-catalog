@@ -23,6 +23,25 @@ LOGS = os.path.join(HOME, "logs")
 STEPS = ["crawl", "derive", "readback", "resync", "checklists"]
 
 
+def mem_mb():
+    """(current, peak) working set of this process in MB (Windows; (0, 0) elsewhere). Logged per step so a night that
+    grows toward the machine's limit shows up in the log before it is killed."""
+    try:
+        import ctypes, ctypes.wintypes as w
+        class PMC(ctypes.Structure):
+            _fields_ = [("cb", w.DWORD), ("PageFaultCount", w.DWORD), ("PeakWorkingSetSize", ctypes.c_size_t),
+                        ("WorkingSetSize", ctypes.c_size_t), ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPagedPoolUsage", ctypes.c_size_t), ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaNonPagedPoolUsage", ctypes.c_size_t), ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t)]
+        c = PMC(); c.cb = ctypes.sizeof(PMC)
+        k = ctypes.windll.kernel32; k.GetCurrentProcess.restype = w.HANDLE        # 64-bit handle (not truncated)
+        ps = ctypes.windll.psapi; ps.GetProcessMemoryInfo.argtypes = [w.HANDLE, ctypes.POINTER(PMC), w.DWORD]
+        ps.GetProcessMemoryInfo(k.GetCurrentProcess(), ctypes.byref(c), c.cb)
+        return round(c.WorkingSetSize / 2**20), round(c.PeakWorkingSetSize / 2**20)
+    except Exception:
+        return 0, 0
+
+
 class Tee(io.TextIOBase):
     def __init__(self, *s): self.s = s
     def write(self, x):
@@ -122,7 +141,9 @@ def main():
             toast("Allegis Catalog nightly FAILED", f"Step {step} ({type(e).__name__}). Log: {LOGS}")
             sys.exit(1)
         timings[step] = round(time.time() - t0)
-        print(f"   {step} ok · {timings[step]}s")
+        cur_mb, peak_mb = mem_mb()
+        timings[f"{step}_peak_mb"] = peak_mb
+        print(f"   {step} ok · {timings[step]}s · memory now {cur_mb} MB, process peak so far {peak_mb} MB")
     rec("UPDATE ops.nightly_run SET status='ok', finished_at=now(), steps=%s::jsonb WHERE run_id=%s", (json.dumps(timings), run_id))
     print(f"\nNIGHTLY OK · {json.dumps(timings)}")
 

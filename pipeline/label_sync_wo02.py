@@ -19,6 +19,7 @@ import catalog_labels as cl
 
 APPROVED_DRIVES = ("LIMITED - Finance",)   # R-019; same list as labels_sync.APPROVED_DRIVES
 BATCH = 25
+SEGMENT = 2000   # files per segment in read-back / re-sync: rows, snapshots and plans for one segment only (CAT-WO-03.1)
 
 # field -> cat.document column(s) for a person's confirmed value
 CONFIRM_COL = {
@@ -141,73 +142,87 @@ def report_line(mode, rep, apply):
 
 
 # ------------------------------------------------------------------ 7.1 read-back
-def readback(connect, svc, schema, apply=False, ids=None, log=print):
-    """connect(): a NEW DB connection. The Drive read takes many minutes, so the write phase opens its own."""
+def readback(connect, svc, schema, apply=False, ids=None, log=print, segment=SEGMENT):
+    """connect(): a NEW DB connection. The Drive read takes many minutes, so the write phase opens its own.
+    In SEGMENTS of `segment` files (CAT-WO-03.1: memory stays flat): each segment loads its snapshots and catalog rows,
+    reads its live labels and, with apply, writes its state / person values / labelled-file rows in one transaction."""
     fields = schema.active_fields()
     rep = {"read": 0, "confirmed_by_person": 0, "resynced": 0, "skipped_person": 0, "errors": 0, "by_field": {}}
-    with connect() as conn, conn.cursor() as cur:
-        ids = ids or scope_ids(cur)
-        state = load_state(cur, ids)
-        rows = {}
-        for i in range(0, len(ids), 5000):
-            rows.update(cl.catalog_rows(cur, ids[i:i + 5000]))
+    if not ids:
+        with connect() as conn, conn.cursor() as cur:
+            ids = scope_ids(cur)
     by_field = collections.Counter()
-    labelled, unlabelled, upd_state, confirms = [], [], [], []
-
-    def one(fid, L):
-        if L["http"] == 404:
-            return                         # gone / no access: the crawl handles removals
-        if L["http"] != 200:
-            rep["errors"] += 1; return
-        rep["read"] += 1
-        d = schema.decode(L["labelInfo"])
-        rep["unknown_choices"] = rep.get("unknown_choices", 0) + d["unknown_choices"]
-        # R-026: text in Subject code(s) that is not a roster code is never stored; the file is counted for a look
-        rep["subject_text_not_codes"] = rep.get("subject_text_not_codes", 0) + (d.get("dropped_subject_text", 0) > 0)
-        if not d["has_doc_label"] or d["tier"] == "secret":
-            unlabelled.append(fid); return     # secret tier (R-010): out of the app's labelled set, never confirmed
-        labelled.append(fid)
-        st = state.get(fid) or {}
-        live_codes = {k: d[k] for k in fields} | {"review_status": d["review_status"], "reviewed_by_set": d["reviewed_by_set"]}
-        # first sight of a file: its live labels ARE the machine's bulk write (item 0.3: 0 drift), so a catalog value
-        # that changed since is NOT mistaken for a person's edit (coder review)
-        machine = st.get("machine") or {k: d[k] for k in fields}
-        owned = person_owned(d, machine, fields)
-        prior = set(st.get("person_fields") or [])
-        prev_live = st.get("live") or {}
-        # newly owned, or owned and changed again since the last read (a second edit is captured too)
-        new = [f for f in owned if f not in prior or cl.norm(d.get(f)) != cl.norm(prev_live.get(f))]
-        if new:
-            rep["confirmed_by_person"] += 1
-            by_field.update(new)
-            doc = (rows.get(fid) or {}).get("document_id")
-            if doc is not None:
-                # .extend, not +=: += inside this nested function made `confirms` local and crashed the first
-                # read-back that met a person's edit (2026-11-19, CAT-WO-03.1 hotfix)
-                confirms.extend(confirm_updates(doc, new, d))
-        upd_state.append((fid, json.dumps(machine, default=str), json.dumps(live_codes, default=str), d["review_status"], d["reviewed_by_set"],
-                          sorted(set(st.get("person_fields") or []) | set(owned))))
-
-    seen = set()
-    cl.read_labels(svc, ids, schema.include_labels(), on_item=lambda fid, L: (seen.add(fid), one(fid, L)))
-    rep["errors"] += len(set(ids) - seen)      # never answered after all retries
-    rep["by_field"] = dict(by_field)
-    rep["notes"] = f"labelled {len(labelled):,}; read but without the Allegis Document label {len(unlabelled):,}"
+    n_labelled = n_unlabelled = 0
+    rid = None
     if apply:
         with connect() as conn, conn.cursor() as cur:
             rid = new_run(cur, "readback", True)
-            cur.executemany("""INSERT INTO ops.label_state (file_id, machine, machine_at, live, live_at, review_status, reviewed_by_set, person_fields)
-                               VALUES (%s, %s::jsonb, now(), %s::jsonb, now(), %s, %s, %s)
-                               ON CONFLICT (file_id) DO UPDATE SET live=EXCLUDED.live, live_at=now(), review_status=EXCLUDED.review_status,
-                                 reviewed_by_set=EXCLUDED.reviewed_by_set, person_fields=EXCLUDED.person_fields,
-                                 machine=coalesce(ops.label_state.machine, EXCLUDED.machine),
-                                 machine_at=coalesce(ops.label_state.machine_at, EXCLUDED.machine_at)""", upd_state)
-            for sql, p in confirms:
-                cur.execute(sql, p)
-            # app.labelled_file now comes from Drive: add what carries the label, drop what no longer does
-            cur.executemany("INSERT INTO app.labelled_file (file_id, source) VALUES (%s, 'drive_readback') ON CONFLICT (file_id) DO UPDATE SET source='drive_readback', loaded_at=now()", [(f,) for f in labelled])
-            if unlabelled:
-                cur.execute("DELETE FROM app.labelled_file WHERE file_id = ANY(%s)", (unlabelled,))
+
+    for s0 in range(0, len(ids), segment):
+        seg = ids[s0:s0 + segment]
+        with connect() as conn, conn.cursor() as cur:
+            state = load_state(cur, seg)
+            rows = cl.catalog_rows(cur, seg)
+        labelled, unlabelled, upd_state, confirms = [], [], [], []
+
+        def one(fid, L, state=state, rows=rows, labelled=labelled, unlabelled=unlabelled, upd_state=upd_state, confirms=confirms):
+            if L["http"] == 404:
+                return                         # gone / no access: the crawl handles removals
+            if L["http"] != 200:
+                rep["errors"] += 1; return
+            rep["read"] += 1
+            d = schema.decode(L["labelInfo"])
+            rep["unknown_choices"] = rep.get("unknown_choices", 0) + d["unknown_choices"]
+            # R-026: text in Subject code(s) that is not a roster code is never stored; the file is counted for a look
+            rep["subject_text_not_codes"] = rep.get("subject_text_not_codes", 0) + (d.get("dropped_subject_text", 0) > 0)
+            if not d["has_doc_label"] or d["tier"] == "secret":
+                unlabelled.append(fid); return     # secret tier (R-010): out of the app's labelled set, never confirmed
+            labelled.append(fid)
+            st = state.get(fid) or {}
+            live_codes = {k: d[k] for k in fields} | {"review_status": d["review_status"], "reviewed_by_set": d["reviewed_by_set"]}
+            # first sight of a file: its live labels ARE the machine's bulk write (item 0.3: 0 drift), so a catalog value
+            # that changed since is NOT mistaken for a person's edit (coder review)
+            machine = st.get("machine") or {k: d[k] for k in fields}
+            owned = person_owned(d, machine, fields)
+            prior = set(st.get("person_fields") or [])
+            prev_live = st.get("live") or {}
+            # newly owned, or owned and changed again since the last read (a second edit is captured too)
+            new = [f for f in owned if f not in prior or cl.norm(d.get(f)) != cl.norm(prev_live.get(f))]
+            if new:
+                rep["confirmed_by_person"] += 1
+                by_field.update(new)
+                doc = (rows.get(fid) or {}).get("document_id")
+                if doc is not None:
+                    # .extend, not +=: += inside this nested function made `confirms` local and crashed the first
+                    # read-back that met a person's edit (2026-11-19, CAT-WO-03.1 hotfix)
+                    confirms.extend(confirm_updates(doc, new, d))
+            upd_state.append((fid, json.dumps(machine, default=str), json.dumps(live_codes, default=str), d["review_status"], d["reviewed_by_set"],
+                              sorted(set(st.get("person_fields") or []) | set(owned))))
+
+        seen = set()
+        cl.read_labels(svc, seg, schema.include_labels(), on_item=lambda fid, L, seen=seen, one=one: (seen.add(fid), one(fid, L)))
+        rep["errors"] += len(set(seg) - seen)      # never answered after all retries
+        n_labelled += len(labelled); n_unlabelled += len(unlabelled)
+        if apply:
+            with connect() as conn, conn.cursor() as cur:
+                cur.executemany("""INSERT INTO ops.label_state (file_id, machine, machine_at, live, live_at, review_status, reviewed_by_set, person_fields)
+                                   VALUES (%s, %s::jsonb, now(), %s::jsonb, now(), %s, %s, %s)
+                                   ON CONFLICT (file_id) DO UPDATE SET live=EXCLUDED.live, live_at=now(), review_status=EXCLUDED.review_status,
+                                     reviewed_by_set=EXCLUDED.reviewed_by_set, person_fields=EXCLUDED.person_fields,
+                                     machine=coalesce(ops.label_state.machine, EXCLUDED.machine),
+                                     machine_at=coalesce(ops.label_state.machine_at, EXCLUDED.machine_at)""", upd_state)
+                for sql, p in confirms:
+                    cur.execute(sql, p)
+                # app.labelled_file now comes from Drive: add what carries the label, drop what no longer does
+                cur.executemany("INSERT INTO app.labelled_file (file_id, source) VALUES (%s, 'drive_readback') ON CONFLICT (file_id) DO UPDATE SET source='drive_readback', loaded_at=now()", [(f,) for f in labelled])
+                if unlabelled:
+                    cur.execute("DELETE FROM app.labelled_file WHERE file_id = ANY(%s)", (unlabelled,))
+        del state, rows, labelled, unlabelled, upd_state, confirms, seen
+
+    rep["by_field"] = dict(by_field)
+    rep["notes"] = f"labelled {n_labelled:,}; read but without the Allegis Document label {n_unlabelled:,}"
+    if apply:
+        with connect() as conn, conn.cursor() as cur:
             finish_run(cur, rid, rep)
     log(report_line("readback", rep, apply))
     log(f"  by field (newly person-confirmed): {rep['by_field']}  · {rep['notes']}"
@@ -215,9 +230,11 @@ def readback(connect, svc, schema, apply=False, ids=None, log=print):
     return rep
 
 
-# ------------------------------------------------------------------ 7.2 re-sync
-def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.sleep, hold_entities=()):
-    """hold_entities: file ids whose Entity is NOT written (an entity conflict sent to Review, e.g. NL-I + NL-II)."""
+def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.sleep, hold_entities=(), segment=SEGMENT):
+    """hold_entities: file ids whose Entity is NOT written (an entity conflict sent to Review, e.g. NL-I + NL-II).
+    Works in SEGMENTS of `segment` files (CAT-WO-03.1, Ryan: the dry run was killed for low memory): each segment loads
+    its catalog rows and read-back snapshots, reads its live labels, plans and (with apply) writes, then drops them.
+    Only counters live across segments, so memory stays flat whatever the catalog size."""
     hold_entities = set(hold_entities or ())
     held = set()
     fields = schema.active_fields()
@@ -229,119 +246,133 @@ def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.s
         else:
             cur.execute("SELECT file_id FROM app.labelled_file ORDER BY 1")
             ids = [r[0] for r in cur.fetchall()]
-        state = load_state(cur, ids)
-        if not state:
+        cur.execute("SELECT EXISTS (SELECT 1 FROM ops.label_state WHERE file_id = ANY(%s) AND machine IS NOT NULL)", (ids,))
+        if not cur.fetchone()[0]:
             conn.close()
             raise SystemExit("REFUSED: no ops.label_state for these files - run `readback --apply` first (the re-sync needs the machine snapshot).")
-        rows = {}
-        for i in range(0, len(ids), 5000):
-            rows.update(cl.catalog_rows(cur, ids[i:i + 5000]))
     conn.commit()
-    conn.close()          # the Drive read is long: reconnect for the writes
-    # read live labels right before writing, so a person's edit since the last read-back is still respected
-    plans, skipped_by_field, write_by_field = [], collections.Counter(), collections.Counter()
+    conn.close()
+    skipped_by_field, write_by_field = collections.Counter(), collections.Counter()
+    n_plans, rid, sampled, changed_mtime = 0, None, 0, 0
+    tries = collections.Counter()   # retry cap per file (coder review): a persistent 429 can't loop forever
+    if apply:
+        conn = connect()
+        with conn.cursor() as cur:
+            rid = new_run(cur, "resync", True)
+        conn.commit(); conn.close()
 
-    def plan_one(fid, L):
-        """-> (write fields, skip fields, expected) or None when the file is not a re-sync candidate."""
-        if L["http"] != 200:
-            return None
-        d = schema.decode(L["labelInfo"])
-        if not d["has_doc_label"] or d["tier"] == "secret":
-            return None                   # not labelled (bulk labeller's job) / secret tier: never written
-        st = state.get(fid)
-        if not st or not st.get("machine"):
-            return "no_state"             # never seen by a read-back: nothing known about who set what -> not touched
-        e = cl.expected(rows.get(fid, {}), schema)
-        write, skip = plan_resync(e, d, st["machine"], st.get("person_fields") or [], fields)
-        if fid in hold_entities and "entities" in write:
-            write = [f for f in write if f != "entities"]; held.add(fid)   # a set: the per-batch re-plan calls this again
-        e["_handling_raise"] = cl.handling_raise(e, d, schema)            # CAT-WO-03 R-026 personnel: only ever raises
-        if e["_handling_raise"]:
-            write = write + ["_handling"]
-        return write, skip, e
+    for s0 in range(0, len(ids), segment):
+        seg = ids[s0:s0 + segment]
+        conn = connect()
+        with conn.cursor() as cur:
+            state = load_state(cur, seg)
+            rows = cl.catalog_rows(cur, seg)
+        conn.commit(); conn.close()   # the Drive read is long: reconnect for the writes
+        plans = []
 
-    def one(fid, L):
-        if L["http"] != 200:
-            rep["errors"] += L["http"] != 404; return
-        rep["read"] += 1
-        p = plan_one(fid, L)
-        if p == "no_state":
-            rep["no_state"] += 1; return
-        if not p: return
-        write, skip, e = p
-        if skip:
-            rep["skipped_person"] += 1; skipped_by_field.update(skip)
-        if write:
-            plans.append((fid, write, e)); write_by_field.update(write)
+        def plan_one(fid, L, state=state, rows=rows):
+            """-> (write fields, skip fields, expected) or None when the file is not a re-sync candidate."""
+            if L["http"] != 200:
+                return None
+            d = schema.decode(L["labelInfo"])
+            if not d["has_doc_label"] or d["tier"] == "secret":
+                return None                   # not labelled (bulk labeller's job) / secret tier: never written
+            st = state.get(fid)
+            if not st or not st.get("machine"):
+                return "no_state"             # never seen by a read-back: nothing known about who set what -> not touched
+            e = cl.expected(rows.get(fid, {}), schema)
+            write, skip = plan_resync(e, d, st["machine"], st.get("person_fields") or [], fields)
+            if fid in hold_entities and "entities" in write:
+                write = [f for f in write if f != "entities"]; held.add(fid)   # a set: the per-batch re-plan calls this again
+            e["_handling_raise"] = cl.handling_raise(e, d, schema)            # CAT-WO-03 R-026 personnel: only ever raises
+            if e["_handling_raise"]:
+                write = write + ["_handling"]
+            return write, skip, e
 
-    seen = set()
-    cl.read_labels(svc, ids, schema.include_labels(), on_item=lambda fid, L: (seen.add(fid), one(fid, L)))
-    rep["errors"] += len(set(ids) - seen)
+        def one(fid, L, plan_one=plan_one, plans=plans):
+            if L["http"] != 200:
+                rep["errors"] += L["http"] != 404; return
+            rep["read"] += 1
+            p = plan_one(fid, L)
+            if p == "no_state":
+                rep["no_state"] += 1; return
+            if not p: return
+            write, skip, e = p
+            if skip:
+                rep["skipped_person"] += 1; skipped_by_field.update(skip)
+            if write:
+                plans.append((fid, write, e)); write_by_field.update(write)
+
+        seen = set()
+        # read live labels right before writing, so a person's edit since the last read-back is still respected
+        cl.read_labels(svc, seg, schema.include_labels(), on_item=lambda fid, L, seen=seen, one=one: (seen.add(fid), one(fid, L)))
+        rep["errors"] += len(set(seg) - seen)
+        n_plans += len(plans)
+        if apply and plans:
+            conn = connect()
+            queue = list(plans)
+            while queue:
+                chunk, queue = queue[:BATCH], queue[BATCH:]
+                # re-read THIS batch's labels just before writing and re-plan: an edit made since the first read wins
+                fresh = cl.read_labels(svc, [c[0] for c in chunk], schema.include_labels())
+                replanned = []
+                for fid, _w, _e in chunk:
+                    p = plan_one(fid, fresh.get(fid) or {"http": 0})
+                    if p == "no_state": continue
+                    if not p or not p[0]:
+                        if p and p[1]: rep["skipped_person"] += 1; skipped_by_field.update(p[1])
+                        continue
+                    replanned.append((fid, p[0], p[2]))
+                chunk = replanned
+                if not chunk:
+                    continue
+                smp = chunk[0][0]
+                before = svc.files().get(fileId=smp, fields="modifiedTime", supportsAllDrives=True).execute().get("modifiedTime")
+                retry, ok = [], []
+
+                def cb(req_id, resp, exc, _c=chunk, ok=ok, retry=retry):
+                    item = _c[int(req_id)]
+                    if exc is None:
+                        ok.append(item); return
+                    st = getattr(getattr(exc, "resp", None), "status", 0) or getattr(exc, "status_code", 0)
+                    if (st in (429, 500, 502, 503) or (st == 403 and "rate" in str(exc).lower())) and tries[item[0]] < 4:
+                        tries[item[0]] += 1
+                        if item not in retry: retry.append(item)
+                    else:
+                        rep["errors"] += 1
+
+                b = svc.new_batch_http_request(callback=cb)
+                for i, (fid, write, e) in enumerate(chunk):
+                    mods = mods_for([f for f in write if f != "_handling"], e, schema) + (handling_mods(e.get("_handling_raise"), schema) if "_handling" in write else [])
+                    b.add(svc.files().modifyLabels(fileId=fid, body={"labelModifications": mods}), request_id=str(i))
+                b.execute()
+                after = svc.files().get(fileId=smp, fields="modifiedTime", supportsAllDrives=True).execute().get("modifiedTime")
+                sampled += 1; changed_mtime += before != after
+                with conn.cursor() as cur:
+                    for fid, write, e in ok:
+                        cur.execute("""INSERT INTO ops.label_state (file_id, machine, machine_at) VALUES (%s, %s::jsonb, now())
+                                       ON CONFLICT (file_id) DO UPDATE SET machine = coalesce(ops.label_state.machine, '{}'::jsonb) || EXCLUDED.machine, machine_at = now()""",
+                                    (fid, json.dumps({f: e.get(f) for f in write if f != "_handling"} | (e.get("_handling_raise") or {}), default=str)))
+                conn.commit()
+                rep["resynced"] += len(ok)
+                if retry:
+                    queue = retry + queue; sleep(5 + random.random() * 5)
+                else:
+                    sleep(1.0)
+            conn.close()
+        del state, rows, plans, seen
+
     rep["by_field"] = {"write": dict(write_by_field), "skipped_person": dict(skipped_by_field)}
     rep["held_for_review"] = len(held)
     if not apply:
         rep["resynced"] = 0
-        rep["notes"] = f"would re-sync {len(plans):,} files"
+        rep["notes"] = f"would re-sync {n_plans:,} files"
         log(report_line("resync", rep, apply)); log(f"  {rep['notes']}; by field: {rep['by_field']}")
         return rep
-    conn = connect()
-    with conn.cursor() as cur:
-        rid = new_run(cur, "resync", True)
-    conn.commit()
-    sampled = changed_mtime = 0
-    queue = list(plans)
-    tries = collections.Counter()   # retry cap per file (coder review): a persistent 429 can't loop forever
-    while queue:
-        chunk, queue = queue[:BATCH], queue[BATCH:]
-        # re-read THIS batch's labels just before writing and re-plan: an edit made since the first read wins
-        fresh = cl.read_labels(svc, [c[0] for c in chunk], schema.include_labels())
-        replanned = []
-        for fid, _w, _e in chunk:
-            p = plan_one(fid, fresh.get(fid) or {"http": 0})
-            if p == "no_state": continue
-            if not p or not p[0]:
-                if p and p[1]: rep["skipped_person"] += 1; skipped_by_field.update(p[1])
-                continue
-            replanned.append((fid, p[0], p[2]))
-        chunk = replanned
-        if not chunk:
-            continue
-        smp = chunk[0][0]
-        before = svc.files().get(fileId=smp, fields="modifiedTime", supportsAllDrives=True).execute().get("modifiedTime")
-        retry, ok = [], []
-
-        def cb(req_id, resp, exc, _c=chunk):
-            item = _c[int(req_id)]
-            if exc is None:
-                ok.append(item); return
-            st = getattr(getattr(exc, "resp", None), "status", 0) or getattr(exc, "status_code", 0)
-            if (st in (429, 500, 502, 503) or (st == 403 and "rate" in str(exc).lower())) and tries[item[0]] < 4:
-                tries[item[0]] += 1
-                if item not in retry: retry.append(item)
-            else:
-                rep["errors"] += 1
-
-        b = svc.new_batch_http_request(callback=cb)
-        for i, (fid, write, e) in enumerate(chunk):
-            mods = mods_for([f for f in write if f != "_handling"], e, schema) + (handling_mods(e.get("_handling_raise"), schema) if "_handling" in write else [])
-            b.add(svc.files().modifyLabels(fileId=fid, body={"labelModifications": mods}), request_id=str(i))
-        b.execute()
-        after = svc.files().get(fileId=smp, fields="modifiedTime", supportsAllDrives=True).execute().get("modifiedTime")
-        sampled += 1; changed_mtime += before != after
-        with conn.cursor() as cur:
-            for fid, write, e in ok:
-                cur.execute("""INSERT INTO ops.label_state (file_id, machine, machine_at) VALUES (%s, %s::jsonb, now())
-                               ON CONFLICT (file_id) DO UPDATE SET machine = coalesce(ops.label_state.machine, '{}'::jsonb) || EXCLUDED.machine, machine_at = now()""",
-                            (fid, json.dumps({f: e.get(f) for f in write if f != "_handling"} | (e.get("_handling_raise") or {}), default=str)))
-        conn.commit()
-        rep["resynced"] += len(ok)
-        if retry:
-            queue = retry + queue; sleep(5 + random.random() * 5)
-        else:
-            sleep(1.0)
     rep["notes"] = f"modifiedTime changed on {changed_mtime} of {sampled} sampled files; never read back (not touched) {rep['no_state']:,}"
     rep["by_field"]["mtime_sampled"] = sampled
     rep["by_field"]["mtime_changed"] = changed_mtime
+    conn = connect()
     with conn.cursor() as cur:
         finish_run(cur, rid, rep)
     conn.commit()
