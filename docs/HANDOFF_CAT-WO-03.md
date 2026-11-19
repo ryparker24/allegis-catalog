@@ -2,7 +2,7 @@
 
 *2026-11-18. Codes, IDs and counts only: no LP, individual or file names. Rulings R-025 / R-026 and Ryan's rulings of 2026-11-17/18 (below).*
 
-**Status (kept current):** release in progress. The database is on main; the label drafts are waiting for Ryan to publish in Label manager. See "Release log".
+**Status: RELEASED 2026-11-18.** Database, labels, app (Worker `cf1083df`), nightly hook and re-sync are all done. See "Release log". Defaults 1, 2 and 4 were accepted by Ryan; directory consent (3) is pending, so staff matching stays out of the nightly run.
 
 - **Throwaway Neon branches:**
   - `catwo03-throwaway-2` = `br-hidden-bread-bdzgdudh`, from main after Part 2's re-sync (LSN 2/C52FE880). All counts were re-run there.
@@ -60,7 +60,33 @@
       - Main's stored parties dated from Part 2's derive run, made before its final commits. The released code was first run on main in this release.
       - Proof, on the restore branch `pre-catwo03` (read-only endpoint `ep-rapid-art-bdbrjxhk`): the released code with the WO-03 fix switched off gives 4,458 K1-R3 documents, against 3,120 stored.
       - The next nightly derive plus re-sync would have made the same writes.
-    - **STOPPED for Ryan before `--apply`.**
+    - **STOPPED for Ryan before `--apply`.** Ryan: "apply".
+    - The read-only compute `ep-rapid-art-bdbrjxhk` on `pre-catwo03` was removed after the check. The restore branch is kept for a few days.
+12. **Re-sync applied** (`resync_20261118_174455`):
+    - read 46,259 · **re-synced 4,595** (= the dry run: Issuing 2,449 · Receiving 3,071 · Subject code(s) 2,300 · Handling 3);
+    - person-owned skipped 0 · errors 0 · Entity held 1;
+    - modifiedTime changed on 0 of 184 sampled files.
+13. **Post-checks (main):**
+    - A live dry run on 100 random re-synced files → **0 writes pending**, 0 errors.
+    - `ops.requirement` 3,163 rows (same mix as item 2). Match subject lane 1,229. Review open 40,482.
+    - Subject code(s) on the label for 2,300 files. 117 personnel documents. Roster 414. Overrides 0.
+    - 0 `app` views without `security_barrier`.
+14. **Left in place:**
+    - `pre-catwo03` = `br-gentle-cell-bdflc9ck` (restore point, no compute; keep a few days, then delete).
+    - `catwo03-throwaway-2` = `br-hidden-bread-bdzgdudh` (test branch; delete when no longer needed).
+    - `drive_crawl.py` backup, made before the hook, in the session scratchpad.
+15. **Open:**
+    - Directory consent (steps above). Until then the nightly reports "staff directory not available (skipped)".
+    - Parties Issuing is at 194 of 200 choices, so the next ~6 entities need a design change.
+    - Checklist views in the rail (default 4, later).
+
+## Process lesson (Ryan, 2026-11-18)
+**A release's derive must be re-run after its last code commit and before its dry run.**
+- Part 2 ran `apply_derive_wo02` on main and then kept committing derive changes (`0872787`, `7e133b8`, including the K-1 parties fixes).
+- Main's stored K-1 parties therefore never reflected the released code. Part 2's re-sync wrote labels from that stale state.
+- The gap only surfaced in CAT-WO-03's re-sync dry run: 1,641 K1-R3 Issuing/Receiving sets that were not part of this order.
+- **From now on:** after the last commit that touches derive or apply code, re-run the derive on main (`apply_derive_wo02.py --apply`, or `drive_crawl.py derive`). Do it before the re-sync dry run, so the dry run shows exactly the released code's writes.
+- Release checklists should record the derive's commit sha next to the dry run.
 
 ---
 
