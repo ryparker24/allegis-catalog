@@ -111,3 +111,50 @@
      - No crawl or derive has run on main since Nov 15. Part 2's rules inserted after its derive had only ever run partially (apply_derive alone). It is the process lesson again; tonight's nightly would have made the same change.
      - CAT-WO-03.1 adds 17 K1-R3 documents through ENT-027.
 5. **Labels:** `labels_setup_wo031.py --create-drafts --release` → Allegis Document: 1 unpublished Kind choice ("Audited Financial Statements"); permissions Ryan only. **STOP: Ryan publishes in Label manager.**
+
+## Rulings of 2026-11-19 (Ryan) and how they are applied
+1. **One kind, "Audited Financial Statements" (amended ruling 1).** No new kind.
+   - In the pending Allegis Document draft, my separately added choice (`dc349ac2ce`, never published) was **deleted**.
+   - The existing Kind choice **"Audit Report" (`33143e5d03`) is renamed "Audited Financial Statements"**, same ID. Every file carrying it updates by itself, including Ryan's 26 hand edits.
+   - **STOP: Ryan publishes this one draft.**
+   - **Code rename `audit_report` → `audited_financial_statements`** (`006b_wo031_rename_audit_kind.sql`, *prepared, not yet applied*: Ryan asked for any split before the rename):
+     - documents (machine and person values);
+     - the read-back snapshot (so the rename is not read as a person's edit);
+     - KND-025 v2;
+     - AUD-01;
+     - `vocab.ts`;
+     - after the publish, `labels_schema.json` via `labels_setup_wo031.py --read-published`.
+2. **Requirement years start at each entity's first year** (the earliest `commitment_date` in the Datum roster export; Datum has no first-close date). An entity without roster dates keeps the rule's start.
+   - **7 rows drop:** AUDITED-FS NL-II FY2022 and X FY2022 (both were "missing"; first commitments 2023); ATTOTUDE (first commitment 2026): K1-SET FY2025 and PCAP-Q 2025 Q1–Q4. Test G-F9.
+3. **Test copies deleted:** `catwo03-throwaway-2`, `catwo031-attrib-test`. `pre-catwo03` and `pre-catwo031` kept.
+4. **Nightly:**
+   - Windows scheduled task **"Allegis Catalog nightly"** runs `C:\Python314\python.exe C:\DriveCatalog\app-main\scripts\nightly.py --apply` in `C:\DriveCatalog`.
+   - Steps: crawl → derive → read-back → re-sync (apply) → roster / subject / requirements. Each step is logged; the run stops at the first error.
+   - **When it runs:** daily **22:00**. The ThinkPad's own power history (14 days) shows it awake at 22:00 on 84% of days, against 7–18% between 01:00 and 05:00. When 22:00 is missed (asleep), it runs at the next wake. Allowed on battery, 4 h limit, never two at once.
+   - **How a failed night shows:**
+     1. a red-orange banner in the app ("The nightly catalog run failed at step …", or "No successful nightly catalog run since …" after 36 h);
+     2. a Windows notification;
+     3. `ops.nightly_run.status = failed` with the step and error class;
+     4. Task Scheduler's Last Run Result ≠ 0x0;
+     5. the log `C:\DriveCatalog\logs\nightly_YYYYMMDD_HHMM.log`.
+   - **Safety:** a Google token that can't refresh silently fails the step instead of opening a browser.
+   - **Registered DISABLED** until the CAT-WO-03.1 code is on `app-main`.
+
+## Proposals for Ryan (kinds that overlap; nothing moved yet)
+Measured on main, by document (primary copy), name patterns in memory:
+
+| kind today | docs | what is in it |
+|---|---:|---|
+| `audit_report` | 339 | pdf 275 · Word 31 · **email 23** · sheet 8 · other 2. By name: "audited financial / financial statements" 291, "Annual Report" 27 (26 your hand edits), "audit report" 10, drafts / markups 6, other 5. **No engagement, representation or management letters, and no confirmations.** |
+| `audited_financial_statements` (my rule, merges into the renamed kind) | 251 | pdf 119 · Word 29 · **email 103** |
+| `financial_statements` with "audited" in the name | 110 | pdf 45 · **email 32** · sheet 27 |
+| `quarterly_report` still named "Annual Report" (no legal name / year, or not in `_Final Reports`) | 170 | |
+| `workpaper` | 1,826 | KND-042 / 044 (work papers, reconciliations, rollforwards) |
+| `pbc_request` | 441 | KND-043 |
+
+- **P1 (ruled):** `audit_report` + my temporary `audited_financial_statements` → one kind, **Audited Financial Statements** (the renamed choice).
+- **P2 · emails out:** the **158 email documents** (23 + 103 + 32) are correspondence *about* the audited statements, not the statements. Move them to the existing kind **`correspondence`**, and teach KND-025 / the audited-FS rule to skip email files. Alternative: a new kind `audit_correspondence`, if you want audit mail findable on its own.
+- **P3 · spreadsheets:** the 8 + 27 sheets named "audited" are workbooks. They stay or go to **`financial_statements`**, per your rule that unaudited statements and workbooks stay there.
+- **P4 · Word documents (31 + 29):** drafts of the statements / annual reports. Keep them **Audited Financial Statements** with Status = **Draft**; they never satisfy AUD-01, which needs Final / Issued.
+- **P5 · `financial_statements` PDFs named "audited" (45):** move to **Audited Financial Statements**.
+- **P6 · rule hygiene:** drop "annual report" from KND-005 (it still sends annual reports to `quarterly_report` before the audited-FS rule corrects them). The 170 "Annual Report" `quarterly_report` documents the rule doesn't reach stay as they are until named or linked by hand.
