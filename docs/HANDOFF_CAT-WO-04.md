@@ -58,4 +58,15 @@
 - unchanged suites: `test_label_sync_wo02` 33/33 · `test_wo03` 36/36 · `test_wo031` 12/12 · DB `test_wo031_guards` 8/8 · `test_wo03_guards` 13/13 · vitest 127/127 · `tsc` clean
 
 ## Release log
-1. L6 **Version** created as a DRAFT (`labels_setup_wo04.py --create-drafts --release`), Ryan-only permissions. **STOP: Ryan publishes in Label manager.**
+1. L6 **Version** created as a DRAFT (`labels_setup_wo04.py --create-drafts --release`), Ryan-only permissions. **STOP: Ryan publishes in Label manager.** Ryan published it (4 fields, on for Drive) and accepted the defaults.
+2. Waited for CATWO032 RELEASED (a0086da) and a clean 22:00 nightly; rebased `cat-wo-04` onto a0086da (label dates written as `YYYY-MM-DD` strings).
+3. Disabled the task "Allegis Catalog nightly" for the release window.
+4. `labels_setup_wo04.py --read-published --release` → `src/lib/labels_schema.json` (594d21f). Re-ran: label sync 34/34, wo04 13/13, vitest 129/129, tsc clean.
+5. Neon restore point `pre-catwo04` = `br-restless-night-bdzumcma` (main at LSN 5/1EB80810).
+6. `007_wo04.sql` applied on main; `nightly.py --only derive,checklists` from the release code: NIGHTLY OK. Main: families high 743 (1,736 documents), medium 1,257 (2,931); VF-superseded 993 documents; checklist rows unchanged (3,156).
+7. Re-sync dry run (`nightly_20261120_0819_dry.log`): read 46,259 · would re-sync 2,108 files (L6 Family/Role 2,106 · Supersedes 1,150 · Amends 4 · Status → Superseded 1,150 · Issuer 1 · Entity 1) · person-owned skipped 1 (effective date) · errors 0 · peak 205 MB. **STOP 2: Ryan approved.**
+8. **G-V6 PASS**: one pilot file (`pilot_wo04_mtime.py`), modifiedTime unchanged after the L6 write and after the restore; L6 removed again.
+9. Re-sync APPLY (`nightly_20261120_0959.log`): read 46,259 · **re-synced 2,108** · person-owned skipped 1 · errors 0 · Entity held 1 · 2,260 s · peak 213 MB.
+10. Post-checks: live re-sync dry run over 300 random L6 files → 0 to write, 0 errors. Main counts as in step 6; Find roles current 952 · superseded 847 · draft_of 299 · amends 4 · redline 4; Link versions lane 1,257.
+11. Screenshots: skipped at Ryan's request (Ryan reviews the screens).
+12. Merged `cat-wo-04` into main (fast-forward), pushed, Worker deployed; `app-main` moved to the release commit; nightly task re-enabled.
