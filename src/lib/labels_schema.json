@@ -701,5 +701,34 @@
     "type": "userOptions"
    }
   }
+ },
+ "version": {
+  "label_id": "HC2KIDvJ298NAaZfbZ7PThKNLTNAuw3b4TIRNNEbbFcb",
+  "title": "Version",
+  "fields": {
+   "family": {
+    "field_id": "0e1066c02c",
+    "type": "textOptions"
+   },
+   "role": {
+    "field_id": "e5caab0bff",
+    "type": "selectionOptions",
+    "choices": {
+     "current": "c479e01289",
+     "superseded": "6efee29137",
+     "amends": "cf293f132e",
+     "redline": "ef33a2607d",
+     "draft_of": "00fc2e6c2e"
+    }
+   },
+   "supersedes": {
+    "field_id": "1b7f3c07ed",
+    "type": "textOptions"
+   },
+   "amends": {
+    "field_id": "0ec9dc2c56",
+    "type": "textOptions"
+   }
+  }
  }
 }
