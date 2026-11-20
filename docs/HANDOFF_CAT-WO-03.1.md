@@ -260,3 +260,18 @@ Measured on main, by document (primary copy), name patterns in memory:
 1. The 34 Effective-date writes (400). Ryan may allow one raw-HTTP probe for Drive's error body, or set those copies' dates by hand.
 2. The signed-in smoke test: Checklists, Location and grouping, locations panel, nightly banner.
 3. Follow-ups listed above (AUD-04 annual-report kind, directory consent, rail views, Parties choice limit).
+
+## CAT-WO-03.2 · label dates (2026-11-19, Ryan approved)
+- **Cause:** every label date write sent `setDateValues: [{year, month, day}]` (the Labels admin API's form). Drive `files.modifyLabels` takes RFC 3339 strings ("2025-12-31") and answers the object form with a bare 400.
+  - Affected: the pipeline re-sync (effective / executed / issued dates), the app's Edit labels form and the Review form's executed date.
+  - No date write had ever succeeded: 0 machine-written dates before the fix. One raw request (Ryan approved) returned only "Bad Request"; the 34-file run below confirmed the cause.
+- **Fix `95bb6fe` + `521ab1c`:** dates sent as "YYYY-MM-DD" strings in all three paths. Tests: vitest (Edit labels, Review form) and pipeline G-DT1; pipeline 34/34, vitest 11/11 in `wo031.test.ts`, `tsc` clean.
+- **Release:**
+  - main `521ab1c` pushed; Worker `9178f152-9748-4453-a54b-5e42eb706cde`;
+  - `app-main` moved to `521ab1c` before 22:00, so tonight's nightly runs the fix.
+- **The 34 files:** re-synced as their own process (`C:\DriveCatalog\logs\resync34_*.log`): **34 written, 0 errors** (effective date 34, with period 31, entity 19, kind 3); modifiedTime changed on 0 of 2 sampled. Post-check: 0 labelled files still missing a catalog effective date.
+- **Lost app date edits:**
+  - **None is recorded in the catalog.** `app.review_event` holds only the 113 bulk events of 2026-11-19 (bulk can't set dates), and no single edit, Review confirmation or checklist link was ever recorded.
+  - A refused write returns an error on screen and records nothing, so **failed attempts exist only in the Worker logs** (Workers Logs is on): events `edit_write` / `review_write` / `checklist_override`, outcome `drive_refused`, with the file id.
+  - Querying them needs a Cloudflare credential the session was not allowed to read.
+  - Ryan's 32 hand-set effective dates were set in Drive directly; they are on the labels.
