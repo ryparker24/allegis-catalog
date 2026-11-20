@@ -207,5 +207,10 @@ finally:
     ls.load_state, cl.catalog_rows, cl.read_labels, ls.plan_resync, cl.expected, cl.handling_raise = _saved2
 check("G-RS1 re-sync in segments: same plan as one pass; never more than one segment's files loaded at once", ok2, det)
 
+_sch = cl.Schema(cl.load_schema())
+_m = ls.mods_for(["effective_date"], {"effective_date": "2025-12-31"}, _sch)
+check("G-DT1 the re-sync writes dates as RFC 3339 strings (Drive answers a {year, month, day} object with 400)",
+      bool(_m) and _m[0]["fieldModifications"][0].get("setDateValues") == ["2025-12-31"], str(_m))
+
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)
