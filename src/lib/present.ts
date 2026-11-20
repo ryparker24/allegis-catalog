@@ -42,6 +42,10 @@ export function present<T extends DbRow>(r: LiveRow<T>) {
     location: (d.location as string | null | undefined) ?? null,
     location_folder_id: (d.location_folder_id as string | null | undefined) ?? null,
     other_locations: (d.other_locations as number | null | undefined) ?? 0,
+    // CAT-WO-04: version family (codes / numbers)
+    family_id: (d.family_id as string | number | null | undefined) ?? null,
+    version_role: (d.version_role as string | null | undefined) ?? null,
+    versions: (d.versions as number | null | undefined) ?? null,
     requires_execution: (d.requires_execution as boolean | null | undefined) ?? null,   // Review form: Stage vs Status
     signals: d.signals ?? null,
     confidence: d.confidence ?? null,

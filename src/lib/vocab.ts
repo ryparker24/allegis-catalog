@@ -125,6 +125,13 @@ export const VOCAB = {
     "issued": "Issued",
     "superseded": "Superseded"
   },
+  "version_role": {
+    "current": "Current",
+    "superseded": "Superseded",
+    "amends": "Amends",
+    "redline": "Redline / compare",
+    "draft_of": "Draft of"
+  },
   "party_extra": {
     "LP": "An outside limited partner (no LP names; LP codes only from a list Ryan approves)",
     "EXTERNAL": "Any other third party"

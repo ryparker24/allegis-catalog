@@ -392,3 +392,11 @@ td.gap button.link { color: inherit; }
 .banner.warn { background: #fff4e5; color: #6b3e00; border: 1px solid #f0c27a; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .banner.warn { background: #3a2a10; color: #ffd9a0; border-color: #7a5a20; } }
 :root[data-theme="dark"] .banner.warn { background: #3a2a10; color: #ffd9a0; border-color: #7a5a20; }
+
+/* CAT-WO-04 · Versions timeline (side panel) and the Link versions lane */
+.versions { margin-top: 14px; border-top: 1px solid var(--line, #e5e5e5); padding-top: 10px; }
+.timeline { list-style: none; margin: 6px 0; padding: 0 0 0 12px; border-left: 2px solid var(--line, #e5e5e5); }
+.timeline li { margin: 0 0 8px; padding-left: 8px; position: relative; }
+.timeline li::before { content: ""; position: absolute; left: -19px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--line, #ccc); }
+.timeline li.cur::before { background: var(--accent, #2b6cb0); }
+.lane-family { padding: 10px 12px; border-top: 1px solid var(--line, #eee); }

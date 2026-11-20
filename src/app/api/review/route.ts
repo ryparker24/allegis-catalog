@@ -34,7 +34,8 @@ export async function GET(req: Request) {
     PAGE_SIZE = q.pageSize;
     return D.rows<DbRow>(q.sql, q.params);
   };
-  const countsP = D.rows("SELECT * FROM app.v_review_counts");
+  // CAT-WO-04: + proposed version families waiting in the "Link versions" lane
+  const countsP = D.rows("SELECT c.*, (SELECT count(*)::int FROM app.v_link_versions) AS link_versions FROM app.v_review_counts c");
   const q0 = reviewQuery(rs, skip, 0);
   const matchedP = D.rows<{ n: number }>(q0.countSql, q0.params);
   // Rows the live check drops (no access / check failed) never leave the queue, so a page can come back empty.

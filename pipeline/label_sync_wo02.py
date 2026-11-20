@@ -69,6 +69,7 @@ def mods_for(fields, expected, schema):
         elif kind == "int": per[lk].append({"fieldId": F["field_id"], "setIntegerValues": [str(v)]})
         elif kind == "codes": per[lk].append({"fieldId": F["field_id"], "setTextValues": [cl.codes_to_text(v)]})   # codes only (expected() filters)
         elif kind == "user": per[lk].append({"fieldId": F["field_id"], "setUserValues": [v]})
+        elif kind == "text": per[lk].append({"fieldId": F["field_id"], "setTextValues": [str(v)]})   # L6: catalog IDs only
         else:
             y, m, d = (int(x) for x in str(v)[:10].split("-"))
             # Drive files.modifyLabels takes RFC 3339 full-date STRINGS (a {year, month, day} object is the Labels admin API's

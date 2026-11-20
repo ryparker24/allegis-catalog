@@ -4,6 +4,7 @@ import { api, show, type NotShown, type Row } from "./client";
 import { SidePanel } from "./SidePanel";
 import { BulkEditDialog, EditForm, editInfo, type FieldInfo } from "./EditForm";
 import { SubjectForm } from "./SubjectForm";
+import { VersionsPanel } from "./Versions";
 import { PageHeader } from "./AppShell";
 import { useOutside } from "./ViewTree";
 import { emit, EV, on, shownName, type ViewRef } from "./bus";
@@ -21,6 +22,8 @@ type Filters = Record<string, unknown> & {
   period?: string[]; workstream?: string[]; issuer?: string[]; file_type_family?: string[];
   primary_only?: boolean; is_primary?: "yes" | "no"; fy_range?: Range; modified_time?: Range; signed_date?: Range; effective_date?: Range;
   file_id?: string; document_id?: string;
+  /** CAT-WO-04 R-029: off by default */
+  current_only?: boolean;
 };
 type Spec = { filters: Filters; search?: string; sort: { col: string; dir: "asc" | "desc" }; groupBy: string | null; page: number; pageSize: number };
 type Layout = { columns: string[]; widths: Record<string, number> };
@@ -43,8 +46,9 @@ const FILTER_LABEL: Record<string, string> = {
   kind: "Kind", entity: "Entity", portco: "Portco", fiscal_year: "Fiscal year", stage: "Signing stage", tier: "Handling", period: "Period", workstream: "Workstream",
   issuer: "Issuer type", file_type_family: "File type", primary_only: "Primary copy", is_primary: "Primary copy", fy_range: "Fiscal year", modified_time: "Modified",
   signed_date: "Signed date", effective_date: "Effective date", file_id: "File ID", document_id: "Catalog ID",
+  current_only: "Current versions only", version_role: "Version", versions: "Versions",
 };
-const VOCAB_OF: Record<string, VocabList | undefined> = { kind: "kind", stage: "stage", tier: "tier", period: "period", workstream: "workstream", issuer: "issuer" };
+const VOCAB_OF: Record<string, VocabList | undefined> = { kind: "kind", stage: "stage", tier: "tier", period: "period", workstream: "workstream", issuer: "issuer", version_role: "version_role" };
 const SAVE_DEBOUNCE = 800;
 
 const width = (layout: Layout, k: string) => layout.widths[k] ?? COLUMN_BY_KEY.get(k)?.width ?? 140;
@@ -265,6 +269,20 @@ export function FindClient() {
   }, []);
   useEffect(() => { if (ready) run(spec); }, [spec, ready, run]);
 
+  // CAT-WO-04: Actions > Merge selected into one family (documents, person-set)
+  const mergeSelected = async () => {
+    const docs = [...new Set((res?.rows ?? []).filter((r) => checked.has(r.file_id) && r.document_id != null).map((r) => String(r.document_id)))];
+    if (docs.length < 2) { setErr("Select files of at least two different documents to merge."); return; }
+    if (!window.confirm(`Make these ${docs.length} documents versions of one document? The best signed / issued one becomes current; you can change that in the side panel.`)) return;
+    try {
+      await api("/api/versions", { method: "POST", body: JSON.stringify({ action: "merge", documents: docs }) });
+      run(spec);
+    } catch (e) {
+      const b = (e as { body?: { reason?: string; error?: string } }).body;
+      setErr(b?.reason ?? b?.error ?? (e as Error).message);
+    }
+  };
+
   // ---------------------------------------------------------------- remember the last state per user (item 2)
   useEffect(() => {
     if (!ready) return;
@@ -293,7 +311,7 @@ export function FindClient() {
       if (!isActive(v)) continue;
       let text: string;
       if (Array.isArray(v)) text = v.map((x) => (VOCAB_OF[k] && x !== "(none)" ? display(VOCAB_OF[k]!, String(x)) : String(x))).join(", ");
-      else if (k === "primary_only") text = "only";
+      else if (k === "primary_only" || k === "current_only") text = "on";
       else if (k === "is_primary") text = v === "yes" ? "yes" : "no";
       else if (typeof v === "object") text = rangeText(v as Range);
       else text = `contains “${String(v)}”`;
@@ -396,6 +414,7 @@ export function FindClient() {
     if (k === "kind" && v) return <span title={String(v)}>{show(k, v)}</span>;
     if (k === "file_id" || k === "document_id") return <code>{v == null ? "" : String(v)}</code>;
     if (k === "location") return <LocationCell location={r.location} folderId={r.location_folder_id} other={r.other_locations} />;
+    if (k === "versions") return r.versions && r.versions > 1 ? <span className="badge" title={`${r.versions} versions in this family${r.version_role ? ` · this one: ${show("version_role", r.version_role)}` : ""}`}>{r.versions}</span> : null;
     return show(k, v);
   };
 
@@ -525,6 +544,12 @@ export function FindClient() {
                 <FlagInput value={spec.filters.is_primary ?? (spec.filters.primary_only ? "yes" : undefined)} onChange={(x) => setFilter("is_primary", x)} />
               </div>
               <div className="field">
+                <span className="cap">Versions</span>
+                <label className="row small" title="Hides superseded versions, redlines and drafts of a document that has a current version. Off by default (R-029).">
+                  <input type="checkbox" checked={spec.filters.current_only === true} onChange={(e) => setFilter("current_only", e.target.checked || undefined)} /> Current versions only
+                </label>
+              </div>
+              <div className="field">
                 <span className="cap">Group by</span>
                 <select className="input" value={spec.groupBy ?? ""} onChange={(e) => setSpec((s) => ({ ...s, page: 0, groupBy: e.target.value || null }))}>
                   {GROUPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -554,6 +579,9 @@ export function FindClient() {
                 ))}
                 <div className="sep" />
                 <div className="hint">Writes the label on each selected file as you (500 at most), after a preview. Handling is never editable.</div>
+                <div className="sep" />
+                <button onClick={() => { setPop(null); void mergeSelected(); }} disabled={checked.size < 2}>Merge selected into one family…</button>
+                <div className="hint">Makes the selected documents versions of one document (person-set; the nightly run never undoes it).</div>
               </Pop>
             </div>
             <span>{checked.size ? `${checked.size} of ${pageIds.length} on this page selected` : pageIds.length ? `Select files on this page (${pageIds.length})` : ""}</span>
@@ -662,6 +690,8 @@ export function FindClient() {
               setOpen(upd);
               setRes((r) => (r ? { ...r, rows: r.rows.map((x) => (x.file_id === upd.file_id ? upd : x)) } : r));
             }} />
+            {/* CAT-WO-04: the document's versions (members you can open), with mark current / remove / move / amends */}
+            <VersionsPanel row={open} onChanged={() => run(spec)} />
             {/* CAT-WO-03 R-026: set or correct the document's Subject (roster codes / a staff account) */}
             <SubjectForm row={open} onSaved={(patch) => {
               const upd = { ...open, ...patch } as Row;          // the panel shows the saved subject at once (coder review)

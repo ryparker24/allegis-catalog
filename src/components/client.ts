@@ -42,6 +42,10 @@ export interface Row {
   location?: string | null;
   location_folder_id?: string | null;
   other_locations?: number | null;
+  /** CAT-WO-04 version family */
+  family_id?: string | number | null;
+  version_role?: string | null;
+  versions?: number | null;
   subject_candidates?: string[] | null;
   signed_date: string | null;
   effective_date: string | null;
@@ -58,7 +62,7 @@ export interface Row {
 }
 export interface NotShown { noAccess: number; checkFailed: number; total: number }
 
-const LIST_OF: Record<string, VocabList | undefined> = { kind: "kind", period: "period", stage: "stage", tier: "tier", workstream: "workstream", issuer: "issuer", review: "review", review_status: "review", status: "status" };
+const LIST_OF: Record<string, VocabList | undefined> = { kind: "kind", period: "period", stage: "stage", tier: "tier", workstream: "workstream", issuer: "issuer", review: "review", review_status: "review", status: "status", version_role: "version_role" };
 export function show(col: string, v: unknown): string {
   if (v == null || v === "") return "";
   if (Array.isArray(v)) return v.join(", ");

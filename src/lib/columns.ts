@@ -49,6 +49,9 @@ export const COLUMN_DEFS: ColDef[] = [
   // CAT-WO-03.1: drive › folder path of the primary copy (the crawl's own path data, never a label); shown only on rows
   // that pass the live access check, as names
   { key: "location", label: "Location", type: "text", source: "db", sql: "location", width: 280 },
+  // CAT-WO-04: how many members the document's version family has (applied families only), and this one's role
+  { key: "versions", label: "Versions", type: "text", source: "db", sql: "versions", width: 90 },
+  { key: "version_role", label: "Version", type: "pick", source: "db", sql: "version_role", vocab: "version_role", facet: "version_role", width: 130 },
 ];
 
 export const COLUMN_BY_KEY = new Map(COLUMN_DEFS.map((c) => [c.key, c]));
@@ -68,5 +71,5 @@ export function isFilterable(key: string): boolean {
 export const PICK_FILTER_KEY: Record<string, string> = {
   kind: "kind", entities: "entity", portcos: "portco", period: "period", stage: "stage", workstream: "workstream",
   issuer: "issuer", tier: "tier", file_type_family: "file_type_family",
-  issuing_entity: "issuing_entity", receiving_entities: "receiving_entity", status: "status",
+  issuing_entity: "issuing_entity", receiving_entities: "receiving_entity", status: "status", version_role: "version_role",
 };

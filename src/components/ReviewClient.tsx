@@ -9,9 +9,10 @@ import { shownName } from "./bus";
 import { Icon } from "./icons";
 import { EditForm, editInfo } from "./EditForm";
 import { SubjectForm } from "./SubjectForm";
+import { LinkVersionsLane } from "./Versions";
 import { VOCAB, display, type VocabList } from "@/lib/vocab";
 
-type Counts = { match_subject?: number; stage_unknown?: number; status_unknown?: number; low_confidence_executed?: number; no_kind?: number; open_total?: number; reviewed_today?: number; reviewed_total?: number };
+type Counts = { link_versions?: number; match_subject?: number; stage_unknown?: number; status_unknown?: number; low_confidence_executed?: number; no_kind?: number; open_total?: number; reviewed_today?: number; reviewed_total?: number };
 export type Resp = { counts: Counts; page: number; pageSize?: number; matched?: number; nextPage: number | null; pageRows: number; rows: Row[]; notShown: NotShown; canWrite: boolean };
 
 // lane order as shown (R-022: "Status unknown" right after signing stage unknown)
@@ -224,6 +225,7 @@ function Kpi({ cap, n, exp, on, onClick }: { cap: string; n: number; exp: string
 export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, setCur, setForm, onConfirm, onSkip, onNextPage, list = DEFAULT_LIST, setList, facets, onClearSkipped, onPrevPage, statusPublished = false, editSlot, subjectSlot }: ReviewViewProps) {
   const c = data?.counts ?? {};
   const [pop, setPop] = useState<string | null>(null);
+  const [versionsLane, setVersionsLane] = useState(false);   // CAT-WO-04: the "Link versions" lane (families, not files)
   const [popAt, setPopAt] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const closePop = useCallback(() => setPop(null), []);
   const upd = (l: Partial<ReviewListState>) => setList?.((cur0) => ({ ...cur0, ...l }));
@@ -311,6 +313,7 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
         <Kpi cap="Status unknown" n={c.status_unknown ?? 0} exp="Not a signed document, and no Draft / Final / Issued status found." on={list.lanes.includes("status_unknown")} onClick={setList ? () => toggleLane("status_unknown") : undefined} />
         <Kpi cap="Executed, low confidence" n={c.low_confidence_executed ?? 0} exp="Marked fully executed, but the scan isn't sure." on={list.lanes.includes("low_confidence_executed")} onClick={setList ? () => toggleLane("low_confidence_executed") : undefined} />
         <Kpi cap="Match subject" n={c.match_subject ?? 0} exp="Which roster partner is this document about? (R-026)" on={list.lanes.includes("match_subject")} onClick={setList ? () => toggleLane("match_subject") : undefined} />
+        <Kpi cap="Link versions" n={c.link_versions ?? 0} exp="Proposed version families: accept, split or pick the current one." on={versionsLane} onClick={setList ? () => setVersionsLane((x) => !x) : undefined} />
         <Kpi cap="No kind" n={c.no_kind ?? 0} exp="The catalog couldn't tell what the document is." on={list.lanes.includes("no_kind")} onClick={setList ? () => toggleLane("no_kind") : undefined} />
         <Kpi cap="Reviewed today" n={c.reviewed_today ?? 0} exp="Confirmed or marked wrong since midnight." />
         <Kpi cap="Skipped" n={skipped.length} exp="Set aside in this browser session; nothing written." />
@@ -320,6 +323,7 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
           Could not load the review queue: {loadError}. Reload the page to try again; if it keeps failing, sign in again.
         </div>
       ) : null}
+      {versionsLane ? <LinkVersionsLane /> : (
       <div className={cur ? "find with-panel" : "find"}>
         <section className="card list-card" aria-label="Review queue">
           <div className="filterbar">
@@ -439,6 +443,7 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
           </SidePanel>
         ) : null}
       </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 r"""
 CAT-WO-02 · write the R-021 (Parties on K-1s) and R-022 (Status) rule results to cat.document.*_auto,
 and the item 9 kind rules Ryan ruled on (RK2-RK4 re-kinds, then the no-kind rules) to kind_auto, whole catalog,
-plus the Schwab issuer (PDFs only, round 5).
+plus the Schwab issuer (PDFs only, round 5), then the CAT-WO-04 version families (families_wo04).
 
   py pipeline/apply_derive_wo02.py --db-url-file <url file>            # dry run: counts only
   py pipeline/apply_derive_wo02.py --db-url-file <url file> --apply    # writes *_auto (never *_confirmed)
@@ -166,6 +166,14 @@ def run(conn, ruled=None, apply=True, log=print):
                            WHERE document_id=%s AND (status_auto, status_rule) IS DISTINCT FROM (%s, %s)""",
                         [(st, ru, d, st, ru) for st, ru, d in status])
     conn.commit()
+    # CAT-WO-04: version families, after kind, parties, subject (last night's) and status. Runs here, inside every derive,
+    # so the Superseded status it sets is in place before the read-back / re-sync of the same night (else this step's
+    # status reset above would be pushed to Drive and flipped back the next night).
+    cur = conn.cursor()
+    cur.execute("SELECT to_regclass('cat.doc_family_member') IS NOT NULL")
+    if cur.fetchone()[0]:
+        import families_wo04
+        families_wo04.run(conn, apply=True, log=log)
     log(f"APPLIED: audited FS {len(afs_fy):,}, kinds {len(kinds):,}, execution cleared {len(not_exec):,}, issuers {len(issuers):,}, parties {len(parties):,} documents, status {len(status):,}")
     return c
 

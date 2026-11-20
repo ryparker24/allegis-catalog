@@ -92,8 +92,11 @@ def sub_status(doc, satisfied_when, satisfying_kind):
     return "superseded" if s == "superseded" else "unknown"
 
 
+NOT_CURRENT = ("superseded", "redline", "draft_of")     # CAT-WO-04: a version family member that is not current
+
+
 def rank_key(c):
-    return (not c["satisfying"], not c["kind_satisfying"], -CONF_RANK.get(c.get("partner_conf") or "high", 1), not c["is_primary"],
+    return (c.get("version_role") in NOT_CURRENT, not c["satisfying"], not c["kind_satisfying"], -CONF_RANK.get(c.get("partner_conf") or "high", 1), not c["is_primary"],
             -(c["date_ord"] or 0), c["document_id"])
 
 
@@ -102,6 +105,12 @@ def evaluate(cands, satisfied_when, override=None, no_candidate_result="missing"
     file_id ...). -> (result, sub_status, best or None, sorted candidates, override_id)."""
     for c in cands:
         c["satisfying"] = bool(c["kind_satisfying"] and satisfies(c, satisfied_when))
+        if c.get("version_role") in NOT_CURRENT:
+            c["satisfying"] = False                     # a superseded version never meets a requirement
+    # CAT-WO-04: the best document comes from current members first; a superseded member is shown only when it is the
+    # only kind of candidate ("On file, not final: superseded by ...")
+    if any(c.get("version_role") not in NOT_CURRENT for c in cands):
+        cands = [c for c in cands if c.get("version_role") not in NOT_CURRENT]
     ranked = sorted(cands, key=rank_key)
     if override and override["action"] == "not_required":
         return "not_required", None, (ranked[0] if ranked else None), ranked, override["override_id"]
@@ -113,6 +122,8 @@ def evaluate(cands, satisfied_when, override=None, no_candidate_result="missing"
     best = ranked[0]
     if best["satisfying"] and best.get("partner_conf") != "low":
         return "met", None, best, ranked, None
+    if best.get("version_role") in NOT_CURRENT:
+        return "on_file", "superseded", best, ranked, None
     sub = "partner_unconfirmed" if best["satisfying"] else sub_status(best, satisfied_when, best["kind_satisfying"])
     return "on_file", sub, best, ranked, None
 
@@ -121,8 +132,9 @@ def evaluate(cands, satisfied_when, override=None, no_candidate_result="missing"
 DOCS_SQL = """
 SELECT DISTINCT ON (x.document_id) x.document_id, x.file_id, x.kind, x.entities, x.issuing_entity, x.fiscal_year, x.period,
        x.stage, x.status, x.is_primary,
-       coalesce(x.signed_date, x.issued_date, x.effective_date, x.modified_time::date) AS dt
-FROM app.v_find_x x
+       coalesce(x.signed_date, x.issued_date, x.effective_date, x.modified_time::date) AS dt,
+       x.version_role, fm.supersedes, fm.amends
+FROM app.v_find_x x LEFT JOIN cat.doc_family_member fm ON fm.document_id = x.document_id AND x.family_id IS NOT NULL
 WHERE x.document_id IS NOT NULL AND x.kind = ANY(%s)
 ORDER BY x.document_id, x.is_primary DESC NULLS LAST, x.file_id
 """
@@ -133,6 +145,9 @@ WHERE fd.file_id IN (SELECT file_id FROM (SELECT DISTINCT ON (file_id) file_id, 
                                           WHERE status IN ('confirmed', 'wrong') ORDER BY file_id, event_id DESC) r WHERE r.status = 'wrong'
                      UNION SELECT file_id FROM ops.label_state WHERE review_status = 'wrong')
 """
+
+
+AMENDMENT_KINDS = {"lpa_amendment": "lpa", "operating_agreement_amendment": "operating_agreement"}   # R-028
 
 
 def load(cur):
@@ -160,8 +175,14 @@ def load(cur):
     cur.execute("SELECT DISTINCT ON (req_key) req_key, override_id, action, file_id, document_id FROM app.requirement_override ORDER BY req_key, override_id DESC")
     overrides = {r[0]: dict(zip(["req_key", "override_id", "action", "file_id", "document_id"], r)) for r in cur.fetchall() if r[2] != "clear"}
     kinds = sorted({k for r in rules for k in r["satisfying_kinds"]} | {k for s in sk.values() for k, role in s.items() if role == "candidate"})
-    cur.execute(DOCS_SQL, (kinds,))
-    docs = [dict(zip(["document_id", "file_id", "kind", "entities", "issuing", "fy", "period", "stage", "status", "is_primary", "dt"], r))
+    cur.execute("SELECT to_regclass('cat.doc_family_member') IS NOT NULL")
+    q = DOCS_SQL
+    if not cur.fetchone()[0]:     # before migration 007
+        q = (DOCS_SQL.replace("x.version_role, fm.supersedes, fm.amends", "NULL::text, NULL::bigint, NULL::bigint")
+             .replace(" LEFT JOIN cat.doc_family_member fm ON fm.document_id = x.document_id AND x.family_id IS NOT NULL", ""))
+    cur.execute(q, (kinds + list(AMENDMENT_KINDS),))
+    docs = [dict(zip(["document_id", "file_id", "kind", "entities", "issuing", "fy", "period", "stage", "status", "is_primary", "dt",
+                      "version_role", "supersedes", "amends"], r))
             for r in cur.fetchall()]
     # Ryan 2026-11-19: requirement years start at each entity's FIRST year (earliest commitment date in the Datum roster
     # export), never before. An entity with no roster commitment dates keeps the rule's own start year.
@@ -254,6 +275,10 @@ def build(cur, today, log=print):
         for e in set(d["entities"] or []) | ({d["issuing"]} if d["issuing"] else set()):
             by_entity[e].append(d)
     by_doc = {d["document_id"]: d for d in docs}
+    amendments = collections.defaultdict(list)
+    for d in docs:
+        if d["kind"] in AMENDMENT_KINDS and d.get("amends") and d.get("version_role") not in NOT_CURRENT:
+            amendments[d["amends"]].append(d)
     by_file = {d["file_id"]: d for d in docs}
     run = f"req_{datetime.datetime.now():%Y%m%d_%H%M%S}"
     rows, mix = [], collections.defaultdict(collections.Counter)
@@ -287,7 +312,8 @@ def build(cur, today, log=print):
                 cands.append({"document_id": d["document_id"], "file_id": d["file_id"], "kind": d["kind"], "stage": d["stage"],
                               "status": d["status"], "period": d["period"], "is_primary": bool(d["is_primary"]), "partner_conf": conf,
                               "date": d["dt"].isoformat() if d["dt"] else None, "date_ord": d["dt"].toordinal() if d["dt"] else None,
-                              "kind_satisfying": d["kind"] in sat_kinds})
+                              "kind_satisfying": d["kind"] in sat_kinds,
+                              "version_role": d.get("version_role"), "supersedes": d.get("supersedes")})
             ov = overrides.get(key)
             link_doc = None
             if ov and ov["action"] == "link":
@@ -297,6 +323,12 @@ def build(cur, today, log=print):
             # the MACHINE result is stored; app.v_requirement applies the latest override at read time, so Link / Not required /
             # Clear show at once and the rebuild never undoes them (coder review: storing the override broke Clear)
             result, sub, best, ranked, _ = evaluate(cands, sw, None, no_cand)
+            # R-028: for an LPA (or operating agreement) requirement, the current base plus its amendments
+            if best and best.get("kind") in AMENDMENT_KINDS.values():
+                ranked = ranked + [{"document_id": a["document_id"], "file_id": a["file_id"], "kind": a["kind"], "stage": a["stage"],
+                                    "status": a["status"], "date": a["dt"].isoformat() if a["dt"] else None, "satisfying": False,
+                                    "partner_conf": None, "is_primary": bool(a["is_primary"]), "amends": best["document_id"]}
+                                   for a in amendments.get(best["document_id"], ())]
             ov_id = ov["override_id"] if ov else None
             urg = URGENCY[sub] if result == "on_file" else URGENCY[result]
             rows.append(dict(base, result=result, sub_status=sub, urgency=urg, best=best, cands=ranked, override_id=ov_id))
@@ -314,6 +346,8 @@ def reason(best, result, sub):
     if best.get("status"): bits.append(f"status {best['status']}")
     if best.get("period") and best["period"] != "fy": bits.append(f"period {best['period']}")
     if best.get("partner_conf"): bits.append(f"partner match {best['partner_conf']}")
+    if best.get("version_role") in NOT_CURRENT and best.get("supersedes"):
+        bits.append(f"superseded by catalog ID {best['supersedes']}")
     if not best.get("is_primary", True): bits.append("a copy (primary not in scope)")
     return ("qualifies: " if result == "met" else f"does not qualify ({sub}): ") + ", ".join(bits)
 
@@ -323,7 +357,8 @@ def write(cur, run, rows):
     data = []
     for r in rows:
         b = r["best"]
-        cj = [{k: c.get(k) for k in ("document_id", "file_id", "kind", "stage", "status", "date", "satisfying", "partner_conf", "is_primary")}
+        cj = [{k: c.get(k) for k in ("document_id", "file_id", "kind", "stage", "status", "date", "satisfying", "partner_conf", "is_primary",
+                                     "version_role", "supersedes", "amends")}
               for c in r["cands"][:MAX_CANDIDATES]]
         data.append((r["req_key"], r["rule_id"], r["rule_version"], r["checklist"], r["subtype_code"], r["subject_type"], r["entity_code"],
                      r["partner_code"], r["fiscal_year"], r["fiscal_quarter"], r["result"], r["sub_status"], r["urgency"],

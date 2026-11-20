@@ -32,16 +32,26 @@ FIELDS = {
     "receiving_entities": ("parties", "receiving_entities", "many"),  # R-021 (after publish)
     "subject_codes":      ("parties", "subject_codes", "codes"),      # R-026 (after publish): text field holding roster codes
     "subject_person":     ("parties", "subject_person", "user"),      # R-026 (after publish): a staff Workspace account
+    # CAT-WO-04 R-027 (after publish): L6 Version. Machine-set; a person's value is never overwritten (PERSON_FIELDS),
+    # and is not read back into the catalog (families change through the app's version actions)
+    "version_family":     ("version", "family", "text"),
+    "version_role":       ("version", "role", "one"),
+    "version_supersedes": ("version", "supersedes", "text"),
+    "version_amends":     ("version", "amends", "text"),
     "tier":               ("handling", "tier", "one"),
     "contains":           ("handling", "contains", "many"),
 }
 # Fields a person may own (Handling never: read-only in the app, and the machine keeps writing it).
 PERSON_FIELDS = ["kind", "entities", "portcos", "fiscal_year", "period", "effective_date", "stage", "executed_date",
-                 "status", "issued_date", "issuing_entity", "receiving_entities", "subject_codes", "subject_person"]
+                 "status", "issued_date", "issuing_entity", "receiving_entities", "subject_codes", "subject_person",
+                 "version_family", "version_role", "version_supersedes", "version_amends"]
 # R-026: the Subject code(s) text field holds roster codes ONLY. Anything else read from Drive is dropped (never stored).
 import re as _re
 SUBJECT_CODE = _re.compile(r"^(LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?$")
 STAFF_EMAIL = _re.compile(r"^[a-z0-9._%+-]{1,64}@allegiscapital\.com$")
+
+
+CATALOG_ID = _re.compile(r"^[0-9]{1,12}$")      # L6 Family / Supersedes / Amends hold catalog numbers only
 
 
 def codes_from_text(t):
@@ -115,6 +125,9 @@ class Schema:
                     elif kind == "many": out[f] = sorted(sel)
                     elif kind == "int": out[f] = int(fv["integer"][0]) if fv.get("integer") else None
                     elif kind == "date": out[f] = (fv.get("dateString") or [None])[0]
+                    elif kind == "text":   # L6: catalog IDs only; anything else is dropped (never stored)
+                        t = " ".join(fv.get("text") or []).strip()
+                        out[f] = t if CATALOG_ID.match(t) else None
                     elif kind == "codes":
                         out[f], dropped = codes_from_text(" ".join(fv.get("text") or []))
                         out["dropped_subject_text"] += dropped
@@ -128,6 +141,10 @@ def _iso(v):
     if v is None: return None
     if isinstance(v, (datetime.date, datetime.datetime)): return v.isoformat()[:10]
     return str(v)[:10]
+
+
+def _num(v):
+    return None if v is None else str(v)
 
 
 def expected(r, schema):
@@ -145,6 +162,8 @@ def expected(r, schema):
         "issuing_entity": r.get("issuing_entity"), "receiving_entities": sorted(r.get("receiving_entities") or []),
         "subject_codes": sorted(c for c in (r.get("subject_codes") or []) if SUBJECT_CODE.match(c)),
         "subject_person": r.get("subject_person") if STAFF_EMAIL.match(r.get("subject_person") or "") else None,
+        "version_family": _num(r.get("version_family")), "version_role": r.get("version_role"),
+        "version_supersedes": _num(r.get("version_supersedes")), "version_amends": _num(r.get("version_amends")),
         "tier": r.get("handling"), "contains": ["lp_pii"] if r.get("pii_lp") else [],
         "_personnel": bool(r.get("personnel")),
     }
@@ -261,12 +280,25 @@ SELECT f.file_id, f.handling, d.document_id,
        coalesce(d.subject_codes_confirmed, d.subject_codes_auto) AS subject_codes,
        coalesce(d.subject_person_confirmed, d.subject_person_auto) AS subject_person,
        d.personnel_auto AS personnel,
+       CASE WHEN vf.confidence IN ('high', 'person') THEN vm.family_id END AS version_family,
+       CASE WHEN vf.confidence IN ('high', 'person') THEN vm.role END AS version_role,
+       CASE WHEN vf.confidence IN ('high', 'person') THEN vm.supersedes END AS version_supersedes,
+       CASE WHEN vf.confidence IN ('high', 'person') THEN vm.amends END AS version_amends,
        d.updated_at
 FROM cat.file f
 LEFT JOIN cat.file_document fd ON fd.file_id=f.file_id
 LEFT JOIN cat.document d ON d.document_id=fd.document_id
+LEFT JOIN cat.doc_family_member vm ON vm.document_id=d.document_id
+LEFT JOIN cat.doc_family vf ON vf.family_id=vm.family_id
 WHERE f.file_id = ANY(%s)
 """
+# Before migration 007 (CAT-WO-04) the family tables don't exist
+_NO_FAMILY = lambda q: (q.replace("CASE WHEN vf.confidence IN ('high', 'person') THEN vm.family_id END", "NULL::bigint")
+                         .replace("CASE WHEN vf.confidence IN ('high', 'person') THEN vm.role END", "NULL::text")
+                         .replace("CASE WHEN vf.confidence IN ('high', 'person') THEN vm.supersedes END", "NULL::bigint")
+                         .replace("CASE WHEN vf.confidence IN ('high', 'person') THEN vm.amends END", "NULL::bigint")
+                         .replace("LEFT JOIN cat.doc_family_member vm ON vm.document_id=d.document_id", "")
+                         .replace("LEFT JOIN cat.doc_family vf ON vf.family_id=vm.family_id", ""))
 # Before migration 004 the WO-02 columns don't exist: the item-0 measurement uses this variant.
 CATALOG_SQL_V1 = (CATALOG_SQL
     .replace("coalesce(d.entities_confirmed, (SELECT", "((SELECT").replace("e.file_id=f.file_id)) AS entities", "e.file_id=f.file_id)) AS entities")
@@ -290,7 +322,11 @@ def catalog_rows(cur, ids, v1=False, v2=None):
     if v2 is None and not v1:
         cur.execute("SELECT 1 FROM information_schema.columns WHERE table_schema='cat' AND table_name='document' AND column_name='subject_codes_auto'")
         v2 = cur.fetchone() is None
-    cur.execute(CATALOG_SQL_V1 if v1 else CATALOG_SQL_V2 if v2 else CATALOG_SQL, (list(ids),))
+    q = CATALOG_SQL_V1 if v1 else CATALOG_SQL_V2 if v2 else CATALOG_SQL
+    cur.execute("SELECT to_regclass('cat.doc_family_member') IS NOT NULL")
+    if not cur.fetchone()[0]:
+        q = _NO_FAMILY(q)
+    cur.execute(q, (list(ids),))
     cols = [c.name for c in cur.description]
     return {r[0]: dict(zip(cols, r)) for r in cur.fetchall()}
 

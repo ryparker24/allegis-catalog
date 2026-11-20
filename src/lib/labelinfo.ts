@@ -20,6 +20,7 @@ export const LABEL_ABOUT: Record<string, string> = {
   handling: "How carefully the file must be handled. Read-only in the app.",
   review: "Whether a person has checked the catalog's values.",
   parties: "Who issued the document and who received it (R-021). Codes only: never an LP or individual name.",
+  version: "Which version of a document this file is (R-027): its family, its role, and the catalog IDs it supersedes or amends. Set by the catalog; change it with the Versions actions in the side panel. A person's value is never overwritten.",
 };
 
 export const FIELD_META: Record<string, Record<string, FieldMeta>> = {
@@ -44,6 +45,12 @@ export const FIELD_META: Record<string, Record<string, FieldMeta>> = {
   parties: {
     issuing_entity: { title: "Issuing entity", about: "Who issued the document: an Allegis entity, a portfolio company, or EXTERNAL.", editable: "part2", vocab: "party" },
     receiving_entities: { title: "Receiving entity", about: "Who received it: Allegis entities, LP (an outside limited partner) or EXTERNAL.", editable: "part2", vocab: "party" },
+  },
+  version: {
+    family: { title: "Family", about: "The catalog family ID: every version of the same document shares it.", editable: "machine" },
+    role: { title: "Role", about: "Current (the version in force), Superseded, Amends (an amendment that stays in force alongside its base, R-028), Redline / compare, or Draft of.", editable: "machine", vocab: "version_role" },
+    supersedes: { title: "Supersedes", about: "On a superseded version: the catalog ID of the version that replaced it.", editable: "machine" },
+    amends: { title: "Amends", about: "On an amendment: the catalog ID of the base document it amends.", editable: "machine" },
   },
   handling: {
     tier: { title: "Tier", about: "Normal, Restricted, or Secret (never shown anywhere).", editable: "never", vocab: "tier" },
@@ -73,7 +80,7 @@ const MULTI = new Set(["doc.entity", "doc.portco", "handling.contains", "parties
 export function buildLabelsPanel(names: { entity: Map<string, string>; portco: Map<string, string> }): PanelLabel[] {
   const published: PanelLabel[] = Object.entries(S).map(([lk, L]) => ({
     key: lk,
-    title: lk === "parties" ? "Parties (L11)" : lk === "exec" && !L.fields.status ? `${L.title} (to be renamed Status & Execution)` : L.title,
+    title: lk === "parties" ? "Parties (L11)" : lk === "version" ? "Version (L6)" : lk === "exec" && !L.fields.status ? `${L.title} (to be renamed Status & Execution)` : L.title,
     about: LABEL_ABOUT[lk] ?? "",
     fields: Object.entries(L.fields).map(([fk, F]) => {
       const m = FIELD_META[lk]?.[fk] ?? { title: fk, about: "", editable: "machine" as Editable };
@@ -115,5 +122,15 @@ export function buildLabelsPanel(names: { entity: Map<string, string>; portco: M
   // the panel order stays Allegis Document, (Status &) Execution, Parties, Handling, Catalog Review once published too
   const i = published.findIndex((l) => l.key === "parties");
   if (i > 2) published.splice(2, 0, ...published.splice(i, 1));
+  // CAT-WO-04: L6 Version, shown as planned until it is published on Drive
+  if (!S.version) {
+    published.push({
+      key: "version", title: "Version (L6)", about: LABEL_ABOUT.version, planned: true,
+      fields: Object.entries(FIELD_META.version).map(([key, m]) => ({
+        key, title: m.title, about: m.about, type: key === "role" ? "pick list" : "text", multi: false, editable: "machine" as Editable, planned: true,
+        choices: key === "role" ? Object.entries(VOCAB.version_role).map(([code, meaning]) => ({ code, meaning })) : [],
+      })),
+    });
+  }
   return published;
 }

@@ -11,7 +11,7 @@ export async function GET(req: Request) {
   if (!g.ok) return g.response;
   const D = db(env);
   const V = "app.v_find_x";
-  const [kind, entity, portco, fy, stage, tier, period, workstream, issuer, ftf, issuing, receiving, status] = await Promise.all([
+  const [kind, entity, portco, fy, stage, tier, period, workstream, issuer, ftf, issuing, receiving, status, versionRole] = await Promise.all([
     D.rows(`SELECT coalesce(kind,'(none)') AS value, count(*)::int AS n FROM ${V} GROUP BY 1 ORDER BY 2 DESC`),
     D.rows(`SELECT e AS value, count(*)::int AS n FROM ${V}, unnest(entities) e GROUP BY 1 ORDER BY 1`),
     D.rows(`SELECT p AS value, coalesce(max(vp.display_name), p) AS label, count(*)::int AS n
@@ -26,6 +26,7 @@ export async function GET(req: Request) {
     D.rows(`SELECT coalesce(issuing_entity,'(none)') AS value, count(*)::int AS n FROM ${V} GROUP BY 1 ORDER BY 2 DESC`),
     D.rows(`SELECT r AS value, count(*)::int AS n FROM ${V}, unnest(CASE WHEN cardinality(receiving_entities)=0 THEN ARRAY['(none)'] ELSE receiving_entities END) r GROUP BY 1 ORDER BY 2 DESC`),
     D.rows(`SELECT coalesce(status,'(none)') AS value, count(*)::int AS n FROM ${V} GROUP BY 1 ORDER BY 2 DESC`),
+    D.rows(`SELECT coalesce(version_role,'(none)') AS value, count(*)::int AS n FROM ${V} GROUP BY 1 ORDER BY 2 DESC`),
   ]);
-  return json({ kind, entity, portco, fiscal_year: fy, stage, tier, period, workstream, issuer, file_type_family: ftf, issuing_entity: issuing, receiving_entity: receiving, status }, 200, { "cache-control": "private, max-age=120" });
+  return json({ kind, entity, portco, fiscal_year: fy, stage, tier, period, workstream, issuer, file_type_family: ftf, issuing_entity: issuing, receiving_entity: receiving, status, version_role: versionRole }, 200, { "cache-control": "private, max-age=120" });
 }

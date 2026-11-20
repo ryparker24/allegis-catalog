@@ -30,6 +30,8 @@ export interface FindSpec {
     issuing_entity?: string[];
     receiving_entity?: string[];
     status?: string[];
+    version_role?: string[];
+    versions?: string;
     issued_date?: Range;
     // v1 "primary copy only" (kept); same as is_primary = "yes"
     primary_only?: boolean;
@@ -43,6 +45,9 @@ export interface FindSpec {
     document_id?: string;
     /** CAT-WO-03.1: "path contains" on drive › folder path (the crawl's path data, never a label) */
     location?: string;
+    /** CAT-WO-04 R-029: only current versions (drops superseded / redline / draft-of members of applied families).
+     *  Off by default; turned on by default once Ryan has reviewed a sample of families. */
+    current_only?: boolean;
   };
   search?: string;
   sort?: { col: string; dir: "asc" | "desc" };
@@ -143,6 +148,12 @@ export function buildWhere(spec: FindSpec, opts: WhereOpts = {}): Built {
   scalarIn("issuing_entity", codes(f.issuing_entity, "issuing_entity"));
   arrayAny("receiving_entities", codes(f.receiving_entity, "receiving_entity"));
   scalarIn("status", codes(f.status, "status"));
+  scalarIn("version_role", codes(f.version_role, "version_role"));
+  if (f.versions != null && f.versions !== "") {          // the Versions column filter: an exact member count
+    const n = Number(f.versions);
+    if (!Number.isInteger(n) || n < 1 || n > 10_000) throw new SpecError("versions: bad value");
+    parts.push(`versions = ${p(n)}::int`);
+  }
 
   const fy = codes(f.fiscal_year, "fiscal_year");
   if (fy.length) {
@@ -165,6 +176,8 @@ export function buildWhere(spec: FindSpec, opts: WhereOpts = {}): Built {
     if (b) parts.push(`${col} < (${p(b)}::date + 1)`);
   }
   if (f.primary_only === true) parts.push("is_primary IS TRUE");
+  if (f.current_only === true) parts.push("(version_role IS NULL OR version_role IN ('current', 'amends'))");
+  else if (f.current_only != null && f.current_only !== false) throw new SpecError("current_only: bad value");
   if (f.is_primary != null) {
     if (f.is_primary === "yes") parts.push("is_primary IS TRUE");
     else if (f.is_primary === "no") parts.push("is_primary IS NOT TRUE");
@@ -207,7 +220,7 @@ export function pageSizeOf(spec: FindSpec): number {
   return (PAGE_SIZES as readonly number[]).includes(n) ? n : DEFAULT_PAGE_SIZE;
 }
 
-const SELECT_COLS = "file_id, document_id, kind, entities, portcos, fiscal_year, period, stage, signed_date, effective_date, workstream, issuer, tier, is_primary, modified_time, file_type_family, issuing_entity, receiving_entities, status, issued_date, subject_codes, subject_person, location, location_folder_id, other_locations";
+const SELECT_COLS = "file_id, document_id, kind, entities, portcos, fiscal_year, period, stage, signed_date, effective_date, workstream, issuer, tier, is_primary, modified_time, file_type_family, issuing_entity, receiving_entities, status, issued_date, subject_codes, subject_person, location, location_folder_id, other_locations, family_id, version_role, versions";
 
 /** Find reads app.v_find_x: v_find (secret tier excluded there) + the CAT-WO-02 fields. */
 export const FIND_VIEW = "app.v_find_x";
@@ -241,7 +254,7 @@ export function groupQuery(spec: FindSpec, opts: WhereOpts = {}): (Built & { sql
 export const EXPORT_LIMIT = 50_000;
 /** Excel is built in Worker memory (~85 bytes of XML per cell): capped well under the 128 MB isolate limit. */
 export const XLSX_LIMIT = 10_000;
-export const EXPORT_COLS = ["file_id", "document_id", "kind", "entities", "portcos", "fiscal_year", "period", "stage", "signed_date", "effective_date", "workstream", "issuing_entity", "receiving_entities", "status", "issued_date", "tier", "is_primary", "modified_time", "web_view_link"];
+export const EXPORT_COLS = ["file_id", "document_id", "kind", "entities", "portcos", "fiscal_year", "period", "stage", "signed_date", "effective_date", "workstream", "issuing_entity", "receiving_entities", "status", "issued_date", "tier", "is_primary", "modified_time", "family_id", "version_role", "versions", "web_view_link"];
 /** CSV / Excel export: codes and Drive links only - no names. */
 export function exportQuery(spec: FindSpec, opts: WhereOpts = {}, limit = EXPORT_LIMIT): Built & { sql: string } {
   const { where, params } = buildWhere(spec, opts);
@@ -283,7 +296,7 @@ export function parseLayout(x: unknown): ViewLayout {
 }
 
 const FILTER_KEYS = new Set([
-  ...Object.values(PICK_FILTER_KEY), "fiscal_year", "primary_only", "is_primary", "fy_range", "modified_time", "signed_date", "effective_date", "issued_date", "file_id", "document_id", "location",
+  ...Object.values(PICK_FILTER_KEY), "fiscal_year", "primary_only", "is_primary", "fy_range", "modified_time", "signed_date", "effective_date", "issued_date", "file_id", "document_id", "location", "current_only", "versions",
 ]);
 
 export function parseSpec(x: unknown): FindSpec {
