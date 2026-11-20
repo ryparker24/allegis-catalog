@@ -57,7 +57,7 @@ check("G-D4 families never mix entities, subjects or kinds unless a person merge
 # G5 · no file name in a family row or a label value: reasons are codes, L6 values are numbers / role codes
 reasons = {r for (rs,) in cur.execute("SELECT DISTINCT reason FROM cat.doc_family") for r in rs}
 allowed = {"stem", "similar stem", "same name", "kind", "entities", "subject", "period", "one key missing", "no version marker",
-           "amendment base unclear", "person", "single"}
+           "amendment base unclear", "person", "single", "dates only"}
 import catalog_labels as cl
 cur.execute("""SELECT f.file_id FROM app.v_find_x f JOIN cat.doc_family_member m ON m.document_id = f.document_id LIMIT 2000""")
 ids = [r[0] for r in cur.fetchall()]

@@ -21,7 +21,7 @@ const CONF: Record<string, string> = { high: "matched automatically", medium: "p
 const REASON: Record<string, string> = {
   stem: "same name apart from version marks", "similar stem": "similar name", "same name": "identical name", kind: "kind", entities: "entities",
   subject: "subject", period: "period", "one key missing": "one key missing on a member", "no version marker": "no version marker",
-  "amendment base unclear": "which base it amends is unclear", person: "set by a person",
+  "amendment base unclear": "which base it amends is unclear", "dates only": "names differ only by a date", person: "set by a person",
 };
 
 export function memberLine(m: Member) {

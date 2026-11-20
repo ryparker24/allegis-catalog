@@ -189,6 +189,11 @@ def build(members, tokens=None):
                     # identical names, no version marker on any member: which is current would rest on dates alone
                     fams.append(dict(members=g, confidence="medium", reason=["same name", "kind", "entities", "subject", "period", "no version marker"]))
                     continue
+                if all(t.startswith("VT-date") for m in g for t in m["hits"]) and not (pe and pe[1]):
+                    # the names differ only by a date and no quarter / period is known: dates alone are weak evidence
+                    # of versions (two reports sent on two dates), so a person decides
+                    fams.append(dict(members=g, confidence="medium", reason=["stem", "kind", "entities", "subject", "period", "dates only"]))
+                    continue
                 fams.append(dict(members=g, confidence="high", reason=["stem", "kind", "entities", "subject", "period"]))
             else:
                 singles.extend(g)
