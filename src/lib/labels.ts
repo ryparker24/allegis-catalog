@@ -170,10 +170,6 @@ export function validateReview(x: unknown): { ok: true; value: Omit<ReviewInput,
   return { ok: true, value: { status: o.status, stage: stage as ReviewInput["stage"], executedDate, note, docStatus: docStatus as ReviewInput["docStatus"] } };
 }
 
-function dateValue(s: string) {
-  const [year, month, day] = s.split("-").map(Number);
-  return { year, month, day };
-}
 
 /** Builds files.modifyLabels labelModifications. Touches ONLY the (Status &) Execution and Catalog Review labels. */
 export function buildReviewMods(r: ReviewInput): { labelModifications: unknown[]; labels: ("exec" | "review")[] } {
@@ -182,7 +178,7 @@ export function buildReviewMods(r: ReviewInput): { labelModifications: unknown[]
   const labels: ("exec" | "review")[] = [];
   if (r.stage) {
     const fm: unknown[] = [{ fieldId: E.stage.field_id, setSelectionValues: [E.stage.choices![r.stage]] }];
-    if (r.executedDate) fm.push({ fieldId: E.executed_date.field_id, setDateValues: [dateValue(r.executedDate)] });
+    if (r.executedDate) fm.push({ fieldId: E.executed_date.field_id, setDateValues: [r.executedDate.slice(0, 10)] });   // RFC 3339 full-date string (CAT-WO-03.2)
     else if (r.stage !== "fully_executed") fm.push({ fieldId: E.executed_date.field_id, unsetValues: true });
     // (fully executed with no date given: an executed date already on the label is left as it is)
     mods.push({ labelId: S.exec.label_id, fieldModifications: fm });

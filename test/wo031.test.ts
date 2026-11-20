@@ -59,3 +59,16 @@ describe("checklist link labels the document to match the requirement (CAT-WO-03
     expect(e.kind).toBe("capital_statement");
   });
 });
+
+import { buildReviewMods } from "@/lib/labels";
+describe("label dates are RFC 3339 strings, as Drive files.modifyLabels requires (CAT-WO-03.2)", () => {
+  const dates = (mods: unknown[]) => JSON.stringify(mods).match(/"setDateValues":\[[^\]]*\]/g) ?? [];
+  it("Edit labels: effective / issued / executed dates", () => {
+    const m = buildEditMods({ effective_date: "2025-12-31", stage: "fully_executed", executed_date: "2025-03-31" }, "ryan@allegiscapital.com");
+    expect(dates(m.labelModifications)).toEqual(['"setDateValues":["2025-12-31"]', '"setDateValues":["2025-03-31"]']);
+  });
+  it("Review form: the executed date", () => {
+    const m = buildReviewMods({ status: "confirmed", stage: "fully_executed", executedDate: "2025-03-31", note: null, reviewerEmail: "ryan@allegiscapital.com" } as never);
+    expect(dates(m.labelModifications)).toEqual(['"setDateValues":["2025-03-31"]']);
+  });
+});

@@ -71,7 +71,9 @@ def mods_for(fields, expected, schema):
         elif kind == "user": per[lk].append({"fieldId": F["field_id"], "setUserValues": [v]})
         else:
             y, m, d = (int(x) for x in str(v)[:10].split("-"))
-            per[lk].append({"fieldId": F["field_id"], "setDateValues": [{"year": y, "month": m, "day": d}]})
+            # Drive files.modifyLabels takes RFC 3339 full-date STRINGS (a {year, month, day} object is the Labels admin API's
+            # form, and Drive answers it with a bare 400): CAT-WO-03.2
+            per[lk].append({"fieldId": F["field_id"], "setDateValues": [f"{y:04d}-{m:02d}-{d:02d}"]})
     return [{"labelId": schema.S[lk]["label_id"], "fieldModifications": fm} for lk, fm in per.items()]
 
 

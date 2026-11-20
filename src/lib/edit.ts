@@ -69,7 +69,6 @@ export function validateEdit(x: unknown, opts: { bulk?: boolean } = {}): { ok: t
   return { ok: true, value: out };
 }
 
-function ymd(s: string) { const [year, month, day] = s.split("-").map(Number); return { year, month, day }; }
 
 /**
  * labelModifications for an edit. Never Handling. A single edit (the person looked at THIS file) also sets
@@ -87,7 +86,7 @@ export function buildEditMods(e: EditSet, reviewerEmail: string, opts: { confirm
     else if (kind === "one") m = { fieldId: F.field_id, setSelectionValues: [F.choices![v as string]] };
     else if (kind === "many") m = { fieldId: F.field_id, setSelectionValues: (v as string[]).map((c) => F.choices![c]) };
     else if (kind === "int") m = { fieldId: F.field_id, setIntegerValues: [String(v)] };
-    else m = { fieldId: F.field_id, setDateValues: [ymd(v as string)] };
+    else m = { fieldId: F.field_id, setDateValues: [String(v).slice(0, 10)] };   // RFC 3339 full-date string (CAT-WO-03.2)
     (per[lk] ??= []).push(m);
   }
   // a stage other than fully executed clears a stale executed date (same rule as the Review write)
