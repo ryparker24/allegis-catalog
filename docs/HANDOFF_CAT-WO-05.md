@@ -67,9 +67,14 @@
 15. **Spot-check sheet instead of an eyeballed sample:** person-set statuses are sparse (~60), so per-rule precision against them is thin. `C:\DriveCatalog\proofs\catwo05\rule_spotcheck_*.csv` holds 25 random matches per rule (catalog ID, kind, Drive link; no names) for Ryan to open.
 
 ## Tests
-- pipeline `test_wo05` 22/22 (G-P1 no portal writes; G-P2a–e no names; G-P4 dates as "YYYY-MM-DD"; G-M1 batches of 2,000; mapping, periods, Issued date, kind conflicts, rules, veto)
-- DB `test_wo05_guards` 10/10 on the branch (G-D0 privileges; G-D1 security_barrier; G-P2 no names in the DB / L10; G-P5 re-run changes nothing and no updated_at churn; G-P3 person Status survives; G-S1 person Subject wins; G-M1 memory)
+- pipeline `test_wo05` 23/23 (G-P1 no portal writes; G-P2a–e no names; G-P4 dates as "YYYY-MM-DD"; G-M1 batches of 2,000; mapping, periods, Issued date, kind conflicts, rules, veto)
+- DB `test_wo05_guards` 12/12 on the branch (G-S2 no duplicate Subject codes; G-P6 posted never Superseded; G-D0 privileges; G-D1 security_barrier; G-P2 no names in the DB / L10; G-P5 re-run changes nothing and no updated_at churn; G-P3 person Status survives; G-S1 person Subject wins; G-M1 memory)
 - unchanged suites: label sync 34/34 · wo03 36/36 · wo031 12/12 · wo04 13/13 · DB wo04 11/11 · wo031 8/8 · wo03 13/13 · vitest 137/137 · tsc clean
+
+## Reviews (coder + CISO, before release)
+- **CISO:** (1) side-panel postings now live-checked as the user before any read; (2) `portal_exports` restricted to Ryan / SYSTEM / Administrators (the GP key hashes are unsalted md5, so treat them as names; an HMAC with a key shared with the portal view is the better long-term form); (3) every export cell is code-checked, refused by line and column without echoing the value, plus a CHECK on `fund_ref`; (4) a portal login that can write is refused before any export. Open for Ryan: the portal URL files will sit in `C:\DriveCatalog`, which (like `catalog_db_url.txt` today) grants Authenticated Users modify; (5) Find's CSV / Excel export now includes the Published To codes (intended).
+- **Coder:** (1) the `portals` step never stops the nightly (a bad or missing export keeps the last loaded postings); (2) Subject codes de-duplicated (a duplicate would have made the label look person-edited); (3) the family step never makes a posted document Superseded (no nightly flip; guard G-P6); a person's Draft / Final never shows a machine Issued date. Noted: the R-032 rules apply as soon as the code runs, so the nightly stays disabled from the migration until Ryan's "apply".
+- **Lapse to report:** while exploring the GP portal schema, one read-only grouping query returned the `member.interco_account` labels, which contain individual names, into this session's transcript. Nothing was written anywhere; every later query and export is codes / hashes only.
 
 ## Release log
 1. L10 **Published To** created as a DRAFT (`labels_setup_wo05.py --create-drafts --release`), Ryan-only permissions. **STOP 1: Ryan publishes in Label manager.**
