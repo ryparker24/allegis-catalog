@@ -10,6 +10,6 @@ export async function GET(req: Request) {
   const env = await getEnv();
   const g = await requireUser(req, env, { route: "postings" });
   if (!g.ok) return g.response;
-  const r = await postingsFor(db(env), new URL(req.url).searchParams.get("file_id") ?? "");
+  const r = await postingsFor(db(env), g.session.at, new URL(req.url).searchParams.get("file_id") ?? "");
   return json(r.body, r.status);
 }

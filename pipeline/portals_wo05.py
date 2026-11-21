@@ -47,6 +47,14 @@ TIMELY_DAYS = 270
 CODE_RE = re.compile(r"^(LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?$")
 FILE_RE = re.compile(r"^[A-Za-z0-9_-]{10,80}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# every export cell is checked against its code shape before use; a bad file is refused WITHOUT echoing the value
+CELL_RE = {
+    "posting_id": re.compile(r"^[0-9]{1,12}$"), "drive_file_id": FILE_RE, "partner_ref": re.compile(r"^(|LP-[0-9]{2,6}(-[A-Z]{1,4})?)$"),
+    "member_ref": re.compile(r"^(|[0-9]{1,9})$"), "fund_ref": re.compile(r"^(|FUND-[0-9]{1,6}|[0-9]{1,9})$"),
+    "doc_type": re.compile(r"^[A-Z0-9]{1,6}$"), "period": re.compile(r"^(|\d{4}(-Q[1-4]|-FY)?)$"),
+    "doc_year": re.compile(r"^(\d{4}|Unknown)$"), "posted_date": re.compile(r"^(|\d{4}-\d{2}-\d{2})$"),
+    "published": re.compile(r"^[01]$"), "key_md5": re.compile(r"^[0-9a-f]{32}$"), "key_sorted_md5": re.compile(r"^[0-9a-f]{32}$"),
+}
 
 
 # ------------------------------------------------------------------ pure parts (unit-tested)
@@ -162,6 +170,10 @@ def read_checked(path, expected):
         if cols != expected:
             raise SystemExit(f"REFUSED {os.path.basename(path)}: columns differ from expected")
         rows = list(rd)
+    for i, r in enumerate(rows, start=2):
+        bad = [c for c in expected if not CELL_RE[c].match(r.get(c) or "")]
+        if bad:   # the column and line only, never the value (it could be a name)
+            raise SystemExit(f"REFUSED {os.path.basename(path)}: line {i} column(s) {bad} not code-shaped")
     return rows, hashlib.sha256(open(path, "rb").read()).hexdigest()
 
 
@@ -172,9 +184,6 @@ def read_exports(dirpath=DEFAULT_DIR):
     lp, lsha = read_checked(lf, LP_COLS)
     gp, gsha = read_checked(gf, GP_COLS)
     xw_rows, xsha = read_checked(xf, XW_COLS)
-    for r in lp + gp:
-        if not FILE_RE.match(r["drive_file_id"]) or (r["posted_date"] and not DATE_RE.match(r["posted_date"])):
-            raise SystemExit("REFUSED: a row with a malformed file ID or date")
     xw = {r["member_ref"]: {r["key_md5"], r["key_sorted_md5"]} for r in xw_rows}
     files = [("lp", "postings", lf, ld, lsha, len(lp)), ("gp", "postings", gf, gd, gsha, len(gp)), ("gp", "member_xwalk", xf, xd, xsha, len(xw_rows))]
     return lp, ld, gp, gd, xw, files
@@ -212,6 +221,13 @@ def export_from_portals(dirpath=DEFAULT_DIR, today=None, log=print):
         url = dbg.read_url(url_file)
         with psycopg.connect(url) as con:
             con.read_only = True                              # SELECT only, enforced by the session as well as the grants
+            # CISO review: refuse a login that could write anything (e.g. an owner URL put in the file by mistake)
+            can_write = con.execute("""SELECT EXISTS (SELECT 1 FROM information_schema.table_privileges
+                                          WHERE grantee = current_user AND privilege_type IN ('INSERT','UPDATE','DELETE','TRUNCATE'))
+                                       OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = (SELECT oid FROM pg_roles WHERE rolname = current_user))
+                                       OR (SELECT rolsuper OR rolcreaterole OR rolcreatedb FROM pg_roles WHERE rolname = current_user)""").fetchone()[0]
+            if can_write:
+                raise SystemExit(f"REFUSED: the login in {os.path.basename(url_file)} can write; use the read-only catalog_portal_reader login")
             for stem, cols, sql in jobs:
                 rows = con.execute(sql).fetchall()
                 tmp = os.path.join(dirpath, f".{stem}_{day}.tmp")

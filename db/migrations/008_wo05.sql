@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS ref.portal_posting (
   -- ambiguous: the roster codes the member's name hash matched (one person, a code per relationship); resolved per
   -- document against the document's own entity (doc_partners), never guessed
   partner_candidates text[] CHECK (partner_candidates IS NULL OR array_to_string(partner_candidates, ',') ~ '^((LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?)(,(LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?)*$'),
-  fund_ref        text,
+  fund_ref        text CHECK (fund_ref IS NULL OR fund_ref ~ '^(FUND-[0-9]{1,6}|[0-9]{1,9})$'),
   entity_code     text,
   doc_type        text NOT NULL CHECK (doc_type ~ '^[A-Z0-9]{1,6}$'),
   expected_kind   text,
@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS ref.portal_posting (
   loaded_at       timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE ref.portal_posting ADD COLUMN IF NOT EXISTS partner_candidates text[];
+ALTER TABLE ref.portal_posting DROP CONSTRAINT IF EXISTS portal_posting_fund_ref;
+ALTER TABLE ref.portal_posting ADD CONSTRAINT portal_posting_fund_ref CHECK (fund_ref IS NULL OR fund_ref ~ '^(FUND-[0-9]{1,6}|[0-9]{1,9})$');
 CREATE INDEX IF NOT EXISTS portal_posting_file ON ref.portal_posting (file_id);
 
 CREATE TABLE IF NOT EXISTS ref.portal_export (

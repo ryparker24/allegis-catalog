@@ -6,6 +6,8 @@
  */
 import type { Db } from "./db";
 import { logEvent } from "./log";
+import { accessFor } from "./checklists";
+import type { FetchLike } from "./google";
 
 const FILE_ID_RE = /^[A-Za-z0-9_-]{10,80}$/;
 
@@ -21,8 +23,15 @@ export const DOC_TYPE_LABEL: Record<string, string> = {
 };
 
 /** GET /api/postings?file_id=… → {postings, published: {channels, first_date, ids}}. The file must be one Find shows. */
-export async function postingsFor(D: Db, fileId: string): Promise<{ status: number; body: Record<string, unknown> }> {
+export async function postingsFor(D: Db, token: string, fileId: string, f?: FetchLike): Promise<{ status: number; body: Record<string, unknown> }> {
   if (!FILE_ID_RE.test(fileId)) return { status: 400, body: { error: "bad_file_id" } };
+  // CISO review: the user must be able to open the file right now (live check as the user, R-020), like every other read
+  const acc = await accessFor(token, [fileId], f);
+  if (acc.expired) return { status: 401, body: { error: "signin_required", login: "/api/auth/login" } };
+  if (acc.map.get(fileId)?.state !== "ok") {
+    logEvent("postings_read", { file_id: fileId, count: 0, dropped_no_access: 1 });
+    return { status: 403, body: { error: "no_access" } };
+  }
   const q = await D.rows<{ document_id: string | null; published_channels: string[]; published_date: string | null; published_ids: string[] }>(
     "SELECT document_id::text AS document_id, published_channels, published_date::text AS published_date, published_ids FROM app.v_find_x WHERE file_id = $1",
     [fileId]);

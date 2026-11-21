@@ -3,8 +3,9 @@ CAT-WO-03.1 · the nightly run (Windows scheduled task "Allegis Catalog nightly"
 when 22:00 was missed). Runs from C:\DriveCatalog\app-main (a checkout of main), in C:\DriveCatalog (tokens, DB url):
 
   1. crawl        drive_crawl.incremental (Drive changes since the last crawl)
-  1b. portals     CAT-WO-05: the newest dated portal exports (C:\DriveCatalog\portal_exports) -> ref.portal_posting (codes only;
-                  the portals themselves are never contacted). Partners map to last night's Datum roster.
+  1b. portals     CAT-WO-05: the newest dated portal exports (C:\DriveCatalog\portal_exports) -> ref.portal_posting (codes only).
+                  Only when Ryan's read-only logins exist (lp_portal_url.txt / gp_portal_url.txt) are the portals contacted,
+                  with three SELECTs in a READ ONLY session, refused if the login could write. Partners map to last night's roster.
   2. derive       rules + apply_derive_wo02 (kinds, audited FS, parties, status, locations)
   3. readback     labels -> catalog (a person's edits become person-set values)
   4. resync       catalog -> labels on labelled files, never over a person's value        (--apply writes; else dry run)

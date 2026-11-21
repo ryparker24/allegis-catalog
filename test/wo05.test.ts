@@ -4,6 +4,13 @@ import { postingsFor } from "@/lib/postings";
 import { buildLabelsPanel } from "@/lib/labelinfo";
 import { sanitize } from "@/lib/log";
 import type { Db } from "@/lib/db";
+import { batchResponse } from "./helpers";
+
+const FID = "1AbCdEfGhIjKlMnOpQrStUvWx";
+const drive = (ok: Set<string>) => (async (_url: string, init?: RequestInit) => {
+  const ids = [...String(init?.body ?? "").matchAll(/files\/([A-Za-z0-9_-]+)\?/g)].map((m) => m[1]);
+  return batchResponse(ids.map((id) => (ok.has(id) ? { status: 200, body: { id, name: "n", webViewLink: "l" } } : { status: 404, body: {} })));
+}) as never;
 
 function fakeDb(handler: (sql: string, params: unknown[]) => unknown[]): Db {
   return { rows: async (sql: string, params: unknown[] = []) => handler(sql, params) } as unknown as Db;
@@ -39,15 +46,19 @@ describe("CAT-WO-05 · side panel postings (no partner, no name)", () => {
       if (sql.includes("app.v_find_x")) return [{ document_id: "42", published_channels: ["lp_portal"], published_date: "2026-08-15", published_ids: ["LPD-12"] }];
       return [{ posting_id: "LPD-12", channel: "lp_portal", posted_date: "2026-08-15", doc_type: "CRR", fiscal_year: 2026, fiscal_quarter: 2, match: "file_id" }];
     });
-    const r = await postingsFor(D, "1AbCdEfGhIjKlMnOpQrStUvWx");
+    const r = await postingsFor(D, "tok", FID, drive(new Set([FID])));
     expect(r.status).toBe(200);
     expect((r.body.postings as unknown[]).length).toBe(1);
     expect(seen.join(" ")).not.toMatch(/partner|name/i);
     expect(JSON.stringify(r.body)).not.toMatch(/partner/i);
   });
-  it("refuses a malformed file ID and a file Find does not show", async () => {
-    expect((await postingsFor(fakeDb(() => []), "bad id!")).status).toBe(400);
-    expect((await postingsFor(fakeDb(() => []), "1AbCdEfGhIjKlMnOpQrStUvWx")).status).toBe(403);
+  it("refuses a malformed file ID, a file Find does not show, and (CISO) a file the user cannot open right now - before any DB read", async () => {
+    expect((await postingsFor(fakeDb(() => []), "tok", "bad id!", drive(new Set()))).status).toBe(400);
+    expect((await postingsFor(fakeDb(() => []), "tok", FID, drive(new Set([FID])))).status).toBe(403);
+    let dbRead = false;
+    const r = await postingsFor(fakeDb(() => { dbRead = true; return [{ document_id: "42" }]; }), "tok", FID, drive(new Set()));
+    expect(r.status).toBe(403);
+    expect(dbRead).toBe(false);
   });
   it("logs codes only", () => {
     const s = sanitize({ event: "postings_read", file_id: "1AbCdEfGhIjKlMnOpQrStUvWx", document_id: "42", count: 1 });

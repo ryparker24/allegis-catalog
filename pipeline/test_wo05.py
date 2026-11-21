@@ -23,7 +23,7 @@ check("G-P1 nothing is ever written to either portal: the only portal queries ar
       all(s.lstrip().upper().startswith("SELECT") and not write_kw.search(s) for s in export_sqls)
       and "con.read_only = True" in exp_src and exp_src.count("psycopg.connect(") == 1
       and src.count("LP_URL_FILE") + src.count("GP_URL_FILE") >= 2
-      and "execute(" not in exp_src.replace("con.execute(sql)", ""))
+      and exp_src.count("con.execute(") == 2 and "can_write" in exp_src and "REFUSED" in exp_src)
 
 # ------------------------------------------------------------------ G-P2 no partner name enters the catalog
 check("G-P2a an export with a name-like column is REFUSED (investor_name, display_name, doc_title, email, title)",
@@ -37,6 +37,15 @@ with tempfile.TemporaryDirectory() as td:
         pw.read_checked(p, pw.LP_COLS); refused = False
     except SystemExit as e:
         refused = "REFUSED" in str(e) and "Invented" not in str(e)
+with tempfile.TemporaryDirectory() as td:
+    p = os.path.join(td, "lp_postings_2026-01-01.csv")
+    with open(p, "w", newline="") as fh:
+        csv.writer(fh).writerows([pw.LP_COLS, ["1", "1AbCdEfGhIjKlMnOp", "Invented Person", "FUND-0001", "QR", "2026-Q1", "2026-04-01", "1"]])
+    try:
+        pw.read_checked(p, pw.LP_COLS); refused_cell = False
+    except SystemExit as e:
+        refused_cell = "partner_ref" in str(e) and "Invented" not in str(e)
+check("G-P2f (CISO) a name in a code column is refused by line and column, never echoing the value", refused_cell)
 check("G-P2b reading such a file stops before any row is used, and the refusal names the column, never a value", refused)
 # the GP crosswalk: names are hashed on both sides; the roster name never reaches a row
 roster_name = "Invented Partner Smith"
