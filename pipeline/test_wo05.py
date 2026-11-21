@@ -82,7 +82,8 @@ check("Published To = both channels, the first posted date, posting IDs in order
       pw.issued_values(ps) == (["gp_portal", "lp_portal"], D(2026, 8, 7), ["GPD-9", "LPD-2", "LPD-12"], D(2026, 8, 15)))
 check("Portal kind conflict: both kinds known and different; a blank catalog kind is not a conflict (the kind is never changed)",
       pw.kind_conflict("correspondence", "k1") and not pw.kind_conflict("k1", "k1") and not pw.kind_conflict(None, "k1")
-      and not pw.kind_conflict("k1", None))
+      and not pw.kind_conflict("k1", None)
+      and not pw.kind_conflict("audited_financial_statements", "quarterly_report") and pw.kind_conflict("k1", "capital_statement"))
 
 # ------------------------------------------------------------------ G-P4 dates as "YYYY-MM-DD"
 sch = cl.Schema({"published": {"label_id": "L10", "title": "Published To", "fields": {

@@ -122,9 +122,13 @@ def resolve_for_document(candidates, doc_entities, party_entities):
     return next(iter(hit)) if len(hit) == 1 else None
 
 
+# the portals file annual reports (audited statements) under "Quarterly Reports": those kinds agree with that type
+COMPATIBLE = {"quarterly_report": {"financial_statements", "audited_financial_statements"}}
+
+
 def kind_conflict(doc_kind, expected):
     """a posting disagrees with the catalog when both kinds are known and differ (a blank kind is not a conflict)."""
-    return bool(doc_kind and expected and doc_kind != expected)
+    return bool(doc_kind and expected and doc_kind != expected and doc_kind not in COMPATIBLE.get(expected, ()))
 
 
 def issued_values(postings):
