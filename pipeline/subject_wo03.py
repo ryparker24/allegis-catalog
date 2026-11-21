@@ -222,7 +222,10 @@ def run(conn, apply=False, staff=None, log=print):
     ev_codes = {d: [c for c in (v or []) if isinstance(c, str) and CODE_RE.match(c)] for d, v, at in cur.execute(EVENTS_SQL, ("subject_codes", "subject_codes")) if newer(at) and isinstance(v, list)}
     ev_person = {d: (v if isinstance(v, str) and STAFF_EMAIL.match(v) else None) for d, v, at in cur.execute(EVENTS_SQL, ("subject_person", "subject_person")) if newer(at)}
     events = ev_codes
-    cur.execute(DOCS_SQL, (list(ROSTER_KINDS + GP_AGREEMENT_KINDS), list(set(ev_codes) | set(ev_person))))
+    # CAT-WO-05 R-031: the partner a document was POSTED to in the LP / GP portal (codes only; mapped to the Datum roster)
+    import portals_wo05
+    portal = portals_wo05.doc_partners(cur)
+    cur.execute(DOCS_SQL, (list(ROSTER_KINDS + GP_AGREEMENT_KINDS), list(set(ev_codes) | set(ev_person) | set(portal))))
     docs = {r[0]: r for r in cur.fetchall()}
     ids = list(docs)
     files = collections.defaultdict(list)
@@ -273,6 +276,13 @@ def run(conn, apply=False, staff=None, log=print):
             roster_ents = {issuing} if (kind in ("k1", "capital_statement") and issuing) else entities
             outcome, matches = match_doc(idx, roster_ents, names, segs)
             rule = {"high": "SUBJ-HIGH", "low": "SUBJ-LOW"}.get(outcome)
+        if person_codes is None and did in portal:
+            # a posting is the strongest evidence: the posted-to partner(s) are high; a high name/folder match is kept
+            pm = [(p, e, "portal") for p, e, _h in sorted(portal[did], key=lambda x: x[0])]
+            have = {p for p, _, _ in pm}
+            matches = pm + ([m for m in matches if m[0] not in have] if outcome == "high" else [])
+            outcome, rule = "high", ("SUBJ-PORTAL" if rule != "SUBJ-HIGH" else "SUBJ-PORTAL+HIGH")
+            roster_doc = True
         results[did] = (r, outcome, matches, rule, person_codes, roster_doc, is_pers, names)
     # Part 2's K1-R2 marks a GP as the RECEIVER; a GP gets one or a few K-1s a year from its fund. More than
     # PARTIES_MAX documents for one fund / GP / year are probably K-1s the GP issued to its members: low (Match subject).

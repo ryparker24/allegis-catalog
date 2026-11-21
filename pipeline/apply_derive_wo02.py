@@ -101,6 +101,13 @@ def run(conn, ruled=None, apply=True, log=print):
         k1_folder = collections.Counter(r[4] for r in rows if r[5] == "k1")
         # one result per document: prefer the primary copy's path/name
         rows.sort(key=lambda r: (r[1], not r[9]))
+        # CAT-WO-05: R-031 portal postings (Status = Issued) and the R-032 status rules (proposals; Ryan vetoes at the dry run)
+        import portals_wo05 as pw
+        cur.execute("SELECT to_regclass('ref.portal_posting') IS NOT NULL")
+        wo05 = cur.fetchone()[0]
+        portal_rule = pw.portal_status(cur) if wo05 else {}
+        st_rules = pw.load_status_rules(cur) if wo05 else []
+        k1_years = pw.k1_portal_years(cur) if wo05 else set()
         seen, parties, status = set(), [], []
         fy_of = {}
         for fid, doc, name, segs, parent, kind, ents, req, stage, primary, fam, fy in rows:
@@ -121,7 +128,12 @@ def run(conn, ruled=None, apply=True, log=print):
             st, srule = dw.status_for(kind, bool(req) or kind in executable, name, (segs or [])[1:], stage)
             d_st, d_rule = dw.afs_status(kind, fam)               # P4: a Word file of the audited statements is a draft
             if d_st: st, srule = d_st, d_rule
+            if doc in portal_rule:                                # R-031: posted in a portal = Issued (a person's Status still wins)
+                st, srule = "issued", portal_rule[doc]
+            elif st is None and srule is None and st_rules and not (bool(req) or kind in executable):
+                st, srule = pw.first_rule(st_rules, name, (segs or [])[1:], fam, kind, ents or [], fy, k1_years)
             status.append((st, srule, doc)); c[f"status:{st or '-'}"] += 1
+            if srule and (srule.startswith("ST5-") or srule.startswith("PORTAL-")): c[f"status_rule:{srule}"] += 1
         # CAT-WO-03 default (Ryan's K1-R2 question): a GP RECEIVES one or a few K-1s a year from its fund. More than
         # K1R2_MAX "received" K-1s for one GP and fiscal year are K-1s the GP issued to its members (or a mixed folder),
         # so that group's parties go back to unknown (the subject step sends them to Match subject) - never a guess.
@@ -174,6 +186,11 @@ def run(conn, ruled=None, apply=True, log=print):
     if cur.fetchone()[0]:
         import families_wo04
         families_wo04.run(conn, apply=True, log=log)
+    # CAT-WO-05: Issued date, Published To, posting links, Portal kind conflicts; after families so a posted member stays Issued
+    cur.execute("SELECT to_regclass('ref.portal_posting') IS NOT NULL")
+    if cur.fetchone()[0]:
+        import portals_wo05
+        portals_wo05.apply_issued(conn, apply=True, log=log)
     log(f"APPLIED: audited FS {len(afs_fy):,}, kinds {len(kinds):,}, execution cleared {len(not_exec):,}, issuers {len(issuers):,}, parties {len(parties):,} documents, status {len(status):,}")
     return c
 
