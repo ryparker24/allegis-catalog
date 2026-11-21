@@ -5,6 +5,7 @@ import { SidePanel } from "./SidePanel";
 import { BulkEditDialog, EditForm, editInfo, type FieldInfo } from "./EditForm";
 import { SubjectForm } from "./SubjectForm";
 import { VersionsPanel } from "./Versions";
+import { PostingsPanel } from "./Postings";
 import { PageHeader } from "./AppShell";
 import { useOutside } from "./ViewTree";
 import { emit, EV, on, shownName, type ViewRef } from "./bus";
@@ -47,8 +48,9 @@ const FILTER_LABEL: Record<string, string> = {
   issuer: "Issuer type", file_type_family: "File type", primary_only: "Primary copy", is_primary: "Primary copy", fy_range: "Fiscal year", modified_time: "Modified",
   signed_date: "Signed date", effective_date: "Effective date", file_id: "File ID", document_id: "Catalog ID",
   current_only: "Current versions only", version_role: "Version", versions: "Versions",
+  published_channel: "Published to", published_date: "Posted date", portal_kind_conflict: "Portal kind conflict",
 };
-const VOCAB_OF: Record<string, VocabList | undefined> = { kind: "kind", stage: "stage", tier: "tier", period: "period", workstream: "workstream", issuer: "issuer", version_role: "version_role" };
+const VOCAB_OF: Record<string, VocabList | undefined> = { kind: "kind", stage: "stage", tier: "tier", period: "period", workstream: "workstream", issuer: "issuer", version_role: "version_role", published_channel: "published_channel" };
 const SAVE_DEBOUNCE = 800;
 
 const width = (layout: Layout, k: string) => layout.widths[k] ?? COLUMN_BY_KEY.get(k)?.width ?? 140;
@@ -200,6 +202,8 @@ export function FindClient() {
       const u = new URLSearchParams(window.location.search);
       const viewId = Number(u.get("view"));
       const q = u.get("q") ?? "";
+      // CAT-WO-05: Review › Portal kind conflict opens Find on those documents
+      if (u.get("portal_conflict") === "1") { setSpec({ ...EMPTY, filters: { portal_kind_conflict: true } } as Spec); return; }
       try {
         if (viewId) {
           const r = await api<{ views: SavedView[] }>("/api/views");
@@ -692,6 +696,8 @@ export function FindClient() {
             }} />
             {/* CAT-WO-04: the document's versions (members you can open), with mark current / remove / move / amends */}
             <VersionsPanel row={open} onChanged={() => run(spec)} />
+            {/* CAT-WO-05: where and when the document was posted (channel, date, posting ID; no partner) */}
+            <PostingsPanel row={open} />
             {/* CAT-WO-03 R-026: set or correct the document's Subject (roster codes / a staff account) */}
             <SubjectForm row={open} onSaved={(patch) => {
               const upd = { ...open, ...patch } as Row;          // the panel shows the saved subject at once (coder review)

@@ -52,6 +52,10 @@ export const COLUMN_DEFS: ColDef[] = [
   // CAT-WO-04: how many members the document's version family has (applied families only), and this one's role
   { key: "versions", label: "Versions", type: "text", source: "db", sql: "versions", width: 90 },
   { key: "version_role", label: "Version", type: "pick", source: "db", sql: "version_role", vocab: "version_role", facet: "version_role", width: 130 },
+  // CAT-WO-05 R-030: L10 Published To (machine-set from the portal postings; codes only, never a partner)
+  { key: "published_channels", label: "Published to", type: "pick", source: "db", sql: "published_channels", array: true, vocab: "published_channel", facet: "published_channel", width: 130 },
+  { key: "published_date", label: "Posted date", type: "date", source: "db", sql: "published_date", width: 110 },
+  { key: "published_ids", label: "Posting ID", type: "text", source: "db", sql: "published_ids", width: 130 },
 ];
 
 export const COLUMN_BY_KEY = new Map(COLUMN_DEFS.map((c) => [c.key, c]));
@@ -72,4 +76,5 @@ export const PICK_FILTER_KEY: Record<string, string> = {
   kind: "kind", entities: "entity", portcos: "portco", period: "period", stage: "stage", workstream: "workstream",
   issuer: "issuer", tier: "tier", file_type_family: "file_type_family",
   issuing_entity: "issuing_entity", receiving_entities: "receiving_entity", status: "status", version_role: "version_role",
+  published_channels: "published_channel",
 };

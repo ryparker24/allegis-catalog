@@ -176,6 +176,50 @@ def read_exports(dirpath=DEFAULT_DIR):
     return lp, ld, gp, gd, xw, files
 
 
+# ------------------------------------------------------------------ export (only with Ryan's read-only logins)
+# When C:\DriveCatalog\lp_portal_url.txt and gp_portal_url.txt exist (a login that can SELECT only the columns below; see
+# the handoff for the exact grants), the nightly writes today's dated exports first, inside READ ONLY transactions.
+# Without the files the newest exports on disk are used (the fallback). The URLs are never printed.
+LP_URL_FILE = os.path.join(os.path.dirname(DEFAULT_DIR), "lp_portal_url.txt")
+GP_URL_FILE = os.path.join(os.path.dirname(DEFAULT_DIR), "gp_portal_url.txt")
+LP_EXPORT_SQL = """SELECT document_id, storage_ref, coalesce(lp_id, ''), fund_id,
+       CASE doc_type WHEN 'Quarterly Reports' THEN 'QR' WHEN 'Capital Reconciliation Reports' THEN 'CRR' ELSE 'TAX' END,
+       period, to_char(loaded_at, 'YYYY-MM-DD'), CASE WHEN published THEN 1 ELSE 0 END
+FROM lp_portal.document WHERE storage_provider = 'drive' ORDER BY document_id"""
+GP_EXPORT_SQL = """SELECT d.id, d.drive_file_id, coalesce(d.member_id::text, ''), coalesce(d.fund_id::text, ''),
+       CASE d.doc_type WHEN 'Capital Calls' THEN 'CC' WHEN 'Carried Interest Agreement' THEN 'CIA' WHEN 'GP Legal Docs' THEN 'GPL'
+         WHEN 'K-1s' THEN 'K1' WHEN 'Quarterly Reports' THEN 'QR' WHEN 'Statements' THEN 'ST' WHEN 'W-2' THEN 'W2' ELSE 'OTH' END,
+       d.doc_year, coalesce(d.period, ''), coalesce(to_char(d.modified_at, 'YYYY-MM-DD'), '')
+FROM portal.document d WHERE d.published AND d.drive_file_id IS NOT NULL ORDER BY d.id"""
+# the GP member key view Ryan creates (portal.v_catalog_member_key): member id + two md5 hashes of the normalized name;
+# the login can read the view only, never portal.member
+GP_XW_SQL = "SELECT member_ref, key_md5, key_sorted_md5 FROM portal.v_catalog_member_key ORDER BY member_ref::bigint"
+
+
+def export_from_portals(dirpath=DEFAULT_DIR, today=None, log=print):
+    """-> True when today's exports were written from the portals, False when the URL files are absent (fallback)."""
+    if not (os.path.exists(LP_URL_FILE) and os.path.exists(GP_URL_FILE)):
+        log("portal logins not set up (no lp_portal_url.txt / gp_portal_url.txt): using the newest dated exports on disk")
+        return False
+    import psycopg
+    day = (today or datetime.date.today()).isoformat()
+    for url_file, jobs in ((LP_URL_FILE, [("lp_postings", LP_COLS, LP_EXPORT_SQL)]),
+                           (GP_URL_FILE, [("gp_postings", GP_COLS, GP_EXPORT_SQL), ("gp_member_xwalk", XW_COLS, GP_XW_SQL)])):
+        url = dbg.read_url(url_file)
+        with psycopg.connect(url) as con:
+            con.read_only = True                              # SELECT only, enforced by the session as well as the grants
+            for stem, cols, sql in jobs:
+                rows = con.execute(sql).fetchall()
+                tmp = os.path.join(dirpath, f".{stem}_{day}.tmp")
+                with open(tmp, "w", newline="", encoding="utf-8") as fh:
+                    w = csv.writer(fh, lineterminator="\n")
+                    w.writerow(cols)
+                    w.writerows(rows)
+                os.replace(tmp, os.path.join(dirpath, f"{stem}_{day}.csv"))
+                log(f"  exported {stem}_{day}.csv rows={len(rows)}")
+    return True
+
+
 # ------------------------------------------------------------------ load (nightly step `portals`)
 def build_rows(cur, lp, ld, gp, gd, xw):
     cur.execute("SELECT portal, fund_ref, entity_code FROM ref.portal_fund_map")

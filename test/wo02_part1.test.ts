@@ -165,7 +165,7 @@ describe("item 3 · Labels panel", () => {
   it("lists every label and field with code + meaning, and marks who can edit", () => {
     const L = buildLabelsPanel({ entity: new Map([["MTV-II", "Media Technology Equity Partners, LP"]]), portco: new Map() });
     // Part 2 (published 2026-11-18): Parties (L11) and Status & Execution come from labels_schema.json; same order
-    expect(L.map((x) => x.key)).toEqual(["doc", "exec", "parties", "handling", "review", "version"]);
+    expect(L.map((x) => x.key)).toEqual(["doc", "exec", "parties", "handling", "review", "version", "published"]);   // CAT-WO-05: L10 planned until published
     expect(L.find((x) => x.key === "parties")!.planned).toBeFalsy();
     expect(L[1].title).toBe("Status & Execution");
     const kind = L[0].fields.find((f) => f.key === "kind")!;

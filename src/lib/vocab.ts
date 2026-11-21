@@ -125,6 +125,12 @@ export const VOCAB = {
     "issued": "Issued",
     "superseded": "Superseded"
   },
+  "published_channel": {
+    "lp_portal": "LP portal",
+    "gp_portal": "GP portal",
+    "datum": "Datum",
+    "email": "Email"
+  },
   "version_role": {
     "current": "Current",
     "superseded": "Superseded",

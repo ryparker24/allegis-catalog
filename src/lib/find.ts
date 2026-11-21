@@ -32,6 +32,10 @@ export interface FindSpec {
     status?: string[];
     version_role?: string[];
     versions?: string;
+    /** CAT-WO-05: Published To channel(s), first posted date, and documents in the Review list "Portal kind conflict" */
+    published_channel?: string[];
+    published_date?: Range;
+    portal_kind_conflict?: boolean;
     issued_date?: Range;
     // v1 "primary copy only" (kept); same as is_primary = "yes"
     primary_only?: boolean;
@@ -149,6 +153,9 @@ export function buildWhere(spec: FindSpec, opts: WhereOpts = {}): Built {
   arrayAny("receiving_entities", codes(f.receiving_entity, "receiving_entity"));
   scalarIn("status", codes(f.status, "status"));
   scalarIn("version_role", codes(f.version_role, "version_role"));
+  arrayAny("published_channels", codes(f.published_channel, "published_channel"));
+  if (f.portal_kind_conflict === true) parts.push("document_id IN (SELECT document_id FROM app.v_portal_kind_conflict)");
+  else if (f.portal_kind_conflict != null && f.portal_kind_conflict !== false) throw new SpecError("portal_kind_conflict: bad value");
   if (f.versions != null && f.versions !== "") {          // the Versions column filter: an exact member count
     const n = Number(f.versions);
     if (!Number.isInteger(n) || n < 1 || n > 10_000) throw new SpecError("versions: bad value");
@@ -168,7 +175,7 @@ export function buildWhere(spec: FindSpec, opts: WhereOpts = {}): Built {
     if (a != null) parts.push(`fiscal_year >= ${p(a)}::int`);
     if (b != null) parts.push(`fiscal_year <= ${p(b)}::int`);
   }
-  for (const col of ["modified_time", "signed_date", "effective_date", "issued_date"] as const) {
+  for (const col of ["modified_time", "signed_date", "effective_date", "issued_date", "published_date"] as const) {
     const r = f[col];
     if (!r) continue;
     const a = isoDate(r.from, col), b = isoDate(r.to, col);
@@ -220,7 +227,7 @@ export function pageSizeOf(spec: FindSpec): number {
   return (PAGE_SIZES as readonly number[]).includes(n) ? n : DEFAULT_PAGE_SIZE;
 }
 
-const SELECT_COLS = "file_id, document_id, kind, entities, portcos, fiscal_year, period, stage, signed_date, effective_date, workstream, issuer, tier, is_primary, modified_time, file_type_family, issuing_entity, receiving_entities, status, issued_date, subject_codes, subject_person, location, location_folder_id, other_locations, family_id, version_role, versions";
+const SELECT_COLS = "file_id, document_id, kind, entities, portcos, fiscal_year, period, stage, signed_date, effective_date, workstream, issuer, tier, is_primary, modified_time, file_type_family, issuing_entity, receiving_entities, status, issued_date, subject_codes, subject_person, location, location_folder_id, other_locations, family_id, version_role, versions, published_channels, published_date, published_ids";
 
 /** Find reads app.v_find_x: v_find (secret tier excluded there) + the CAT-WO-02 fields. */
 export const FIND_VIEW = "app.v_find_x";
@@ -254,7 +261,7 @@ export function groupQuery(spec: FindSpec, opts: WhereOpts = {}): (Built & { sql
 export const EXPORT_LIMIT = 50_000;
 /** Excel is built in Worker memory (~85 bytes of XML per cell): capped well under the 128 MB isolate limit. */
 export const XLSX_LIMIT = 10_000;
-export const EXPORT_COLS = ["file_id", "document_id", "kind", "entities", "portcos", "fiscal_year", "period", "stage", "signed_date", "effective_date", "workstream", "issuing_entity", "receiving_entities", "status", "issued_date", "tier", "is_primary", "modified_time", "family_id", "version_role", "versions", "web_view_link"];
+export const EXPORT_COLS = ["file_id", "document_id", "kind", "entities", "portcos", "fiscal_year", "period", "stage", "signed_date", "effective_date", "workstream", "issuing_entity", "receiving_entities", "status", "issued_date", "tier", "is_primary", "modified_time", "family_id", "version_role", "versions", "published_channels", "published_date", "published_ids", "web_view_link"];
 /** CSV / Excel export: codes and Drive links only - no names. */
 export function exportQuery(spec: FindSpec, opts: WhereOpts = {}, limit = EXPORT_LIMIT): Built & { sql: string } {
   const { where, params } = buildWhere(spec, opts);
@@ -296,7 +303,7 @@ export function parseLayout(x: unknown): ViewLayout {
 }
 
 const FILTER_KEYS = new Set([
-  ...Object.values(PICK_FILTER_KEY), "fiscal_year", "primary_only", "is_primary", "fy_range", "modified_time", "signed_date", "effective_date", "issued_date", "file_id", "document_id", "location", "current_only", "versions",
+  ...Object.values(PICK_FILTER_KEY), "fiscal_year", "primary_only", "is_primary", "fy_range", "modified_time", "signed_date", "effective_date", "issued_date", "file_id", "document_id", "location", "current_only", "versions", "published_date", "portal_kind_conflict",
 ]);
 
 export function parseSpec(x: unknown): FindSpec {

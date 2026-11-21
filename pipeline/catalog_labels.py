@@ -38,13 +38,19 @@ FIELDS = {
     "version_role":       ("version", "role", "one"),
     "version_supersedes": ("version", "supersedes", "text"),
     "version_amends":     ("version", "amends", "text"),
+    # CAT-WO-05 R-030 (after publish): L10 Published To. Machine-set from the portal postings; a person's value is never
+    # overwritten (PERSON_FIELDS) and is not read back into the catalog (no CONFIRM_COL entry)
+    "published_channels": ("published", "channel", "many"),
+    "published_date":     ("published", "posted_date", "date"),
+    "published_ids":      ("published", "posting_id", "postids"),
     "tier":               ("handling", "tier", "one"),
     "contains":           ("handling", "contains", "many"),
 }
 # Fields a person may own (Handling never: read-only in the app, and the machine keeps writing it).
 PERSON_FIELDS = ["kind", "entities", "portcos", "fiscal_year", "period", "effective_date", "stage", "executed_date",
                  "status", "issued_date", "issuing_entity", "receiving_entities", "subject_codes", "subject_person",
-                 "version_family", "version_role", "version_supersedes", "version_amends"]
+                 "version_family", "version_role", "version_supersedes", "version_amends",
+                 "published_channels", "published_date", "published_ids"]
 # R-026: the Subject code(s) text field holds roster codes ONLY. Anything else read from Drive is dropped (never stored).
 import re as _re
 SUBJECT_CODE = _re.compile(r"^(LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?$")
@@ -52,6 +58,16 @@ STAFF_EMAIL = _re.compile(r"^[a-z0-9._%+-]{1,64}@allegiscapital\.com$")
 
 
 CATALOG_ID = _re.compile(r"^[0-9]{1,12}$")      # L6 Family / Supersedes / Amends hold catalog numbers only
+POSTING_ID = _re.compile(r"^(LPD|GPD)-[0-9]{1,12}$")   # L10 Posting ID holds the portals' document IDs only
+
+
+def postids_from_text(t):
+    """'LPD-12, GPD-345' -> ['GPD-345', 'LPD-12'] (sorted); anything else is dropped (never stored)."""
+    return sorted({x.strip().upper() for x in _re.split(r"[,;\s]+", t or "") if POSTING_ID.match(x.strip().upper())})
+
+
+def postids_to_text(ids):
+    return ", ".join(sorted(ids or []))
 
 
 def codes_from_text(t):
@@ -98,7 +114,7 @@ class Schema:
 
     def decode(self, label_info):
         """labelInfo -> {field: value} plus review_status / reviewed_by_set / has_doc_label."""
-        out = {f: ([] if FIELDS[f][2] in ("many", "codes") else None) for f in FIELDS}
+        out = {f: ([] if FIELDS[f][2] in ("many", "codes", "postids") else None) for f in FIELDS}
         out.update(review_status=None, reviewed_by_set=False, has_doc_label=False, unknown_choices=0, dropped_subject_text=0)
         for L in (label_info or {}).get("labels", []) or []:
             lk = self.by_label_id.get(L.get("id"))
@@ -128,6 +144,8 @@ class Schema:
                     elif kind == "text":   # L6: catalog IDs only; anything else is dropped (never stored)
                         t = " ".join(fv.get("text") or []).strip()
                         out[f] = t if CATALOG_ID.match(t) else None
+                    elif kind == "postids":   # L10: posting IDs only
+                        out[f] = postids_from_text(" ".join(fv.get("text") or []))
                     elif kind == "codes":
                         out[f], dropped = codes_from_text(" ".join(fv.get("text") or []))
                         out["dropped_subject_text"] += dropped
@@ -164,6 +182,8 @@ def expected(r, schema):
         "subject_person": r.get("subject_person") if STAFF_EMAIL.match(r.get("subject_person") or "") else None,
         "version_family": _num(r.get("version_family")), "version_role": r.get("version_role"),
         "version_supersedes": _num(r.get("version_supersedes")), "version_amends": _num(r.get("version_amends")),
+        "published_channels": sorted(r.get("published_channels") or []), "published_date": _iso(r.get("published_date")),
+        "published_ids": sorted(x for x in (r.get("published_ids") or []) if POSTING_ID.match(x)),
         "tier": r.get("handling"), "contains": ["lp_pii"] if r.get("pii_lp") else [],
         "_personnel": bool(r.get("personnel")),
     }
@@ -173,7 +193,7 @@ def expected(r, schema):
     unwritable = []
     for f, (lk, fk, kind) in FIELDS.items():
         if not schema.has(f):
-            e[f] = [] if kind in ("many", "codes") else None
+            e[f] = [] if kind in ("many", "codes", "postids") else None
             continue
         ch = schema.S[lk]["fields"][fk].get("choices")
         if ch is not None:
@@ -284,6 +304,7 @@ SELECT f.file_id, f.handling, d.document_id,
        CASE WHEN vf.confidence IN ('high', 'person') THEN vm.role END AS version_role,
        CASE WHEN vf.confidence IN ('high', 'person') THEN vm.supersedes END AS version_supersedes,
        CASE WHEN vf.confidence IN ('high', 'person') THEN vm.amends END AS version_amends,
+       d.published_channels_auto AS published_channels, d.published_date_auto AS published_date, d.published_ids_auto AS published_ids,
        d.updated_at
 FROM cat.file f
 LEFT JOIN cat.file_document fd ON fd.file_id=f.file_id
@@ -299,6 +320,9 @@ _NO_FAMILY = lambda q: (q.replace("CASE WHEN vf.confidence IN ('high', 'person')
                          .replace("CASE WHEN vf.confidence IN ('high', 'person') THEN vm.amends END", "NULL::bigint")
                          .replace("LEFT JOIN cat.doc_family_member vm ON vm.document_id=d.document_id", "")
                          .replace("LEFT JOIN cat.doc_family vf ON vf.family_id=vm.family_id", ""))
+_NO_PUBLISHED = lambda q: q.replace(
+    "d.published_channels_auto AS published_channels, d.published_date_auto AS published_date, d.published_ids_auto AS published_ids,",
+    "NULL::text[] AS published_channels, NULL::date AS published_date, NULL::text[] AS published_ids,")
 # Before migration 004 the WO-02 columns don't exist: the item-0 measurement uses this variant.
 CATALOG_SQL_V1 = (CATALOG_SQL
     .replace("coalesce(d.entities_confirmed, (SELECT", "((SELECT").replace("e.file_id=f.file_id)) AS entities", "e.file_id=f.file_id)) AS entities")
@@ -323,6 +347,9 @@ def catalog_rows(cur, ids, v1=False, v2=None):
         cur.execute("SELECT 1 FROM information_schema.columns WHERE table_schema='cat' AND table_name='document' AND column_name='subject_codes_auto'")
         v2 = cur.fetchone() is None
     q = CATALOG_SQL_V1 if v1 else CATALOG_SQL_V2 if v2 else CATALOG_SQL
+    cur.execute("SELECT 1 FROM information_schema.columns WHERE table_schema='cat' AND table_name='document' AND column_name='published_ids_auto'")
+    if cur.fetchone() is None:   # before migration 008 (CAT-WO-05)
+        q = _NO_PUBLISHED(q)
     cur.execute("SELECT to_regclass('cat.doc_family_member') IS NOT NULL")
     if not cur.fetchone()[0]:
         q = _NO_FAMILY(q)

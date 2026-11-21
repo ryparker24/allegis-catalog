@@ -3,6 +3,8 @@ CAT-WO-03.1 · the nightly run (Windows scheduled task "Allegis Catalog nightly"
 when 22:00 was missed). Runs from C:\DriveCatalog\app-main (a checkout of main), in C:\DriveCatalog (tokens, DB url):
 
   1. crawl        drive_crawl.incremental (Drive changes since the last crawl)
+  1b. portals     CAT-WO-05: the newest dated portal exports (C:\DriveCatalog\portal_exports) -> ref.portal_posting (codes only;
+                  the portals themselves are never contacted). Partners map to last night's Datum roster.
   2. derive       rules + apply_derive_wo02 (kinds, audited FS, parties, status, locations)
   3. readback     labels -> catalog (a person's edits become person-set values)
   4. resync       catalog -> labels on labelled files, never over a person's value        (--apply writes; else dry run)
@@ -20,7 +22,7 @@ import argparse, datetime, glob, io, json, os, socket, subprocess, sys, time, tr
 APP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))      # the checkout this script runs from
 HOME = os.environ.get("DRIVECATALOG_DIR", r"C:\DriveCatalog")
 LOGS = os.path.join(HOME, "logs")
-STEPS = ["crawl", "derive", "readback", "resync", "checklists"]
+STEPS = ["crawl", "portals", "derive", "readback", "resync", "checklists"]
 
 
 def mem_mb():
@@ -121,6 +123,14 @@ def main():
         try:
             if step == "crawl":
                 dc.incremental(drive(), post=False)
+            elif step == "portals":
+                import portals_wo05 as pw
+                c = dc.db()
+                try:
+                    pw.export_from_portals(log=print)        # only with Ryan's read-only logins; else the newest exports
+                    pw.load(c, apply=True, log=print)
+                finally:
+                    c.close()
             elif step == "derive":
                 c = dc.db(); dc.derive(c); c.close()
             elif step == "readback":

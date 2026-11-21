@@ -20,6 +20,7 @@ export const LABEL_ABOUT: Record<string, string> = {
   handling: "How carefully the file must be handled. Read-only in the app.",
   review: "Whether a person has checked the catalog's values.",
   parties: "Who issued the document and who received it (R-021). Codes only: never an LP or individual name.",
+  published: "Where and when the document was delivered (R-030): LP portal, GP portal, Datum or Email, the first posted date and the portal's posting IDs. Set by the catalog from the portal postings (read-only sources). A person's value is never overwritten.",
   version: "Which version of a document this file is (R-027): its family, its role, and the catalog IDs it supersedes or amends. Set by the catalog; change it with the Versions actions in the side panel. A person's value is never overwritten.",
 };
 
@@ -52,6 +53,11 @@ export const FIELD_META: Record<string, Record<string, FieldMeta>> = {
     supersedes: { title: "Supersedes", about: "On a superseded version: the catalog ID of the version that replaced it.", editable: "machine" },
     amends: { title: "Amends", about: "On an amendment: the catalog ID of the base document it amends.", editable: "machine" },
   },
+  published: {
+    channel: { title: "Channel", about: "Where it was posted: LP portal, GP portal, Datum or Email.", editable: "machine", vocab: "published_channel" },
+    posted_date: { title: "Posted date", about: "The first posted date (YYYY-MM-DD).", editable: "machine" },
+    posting_id: { title: "Posting ID", about: "The portal's own document IDs (LPD-… / GPD-…). Never a partner or a name.", editable: "machine" },
+  },
   handling: {
     tier: { title: "Tier", about: "Normal, Restricted, or Secret (never shown anywhere).", editable: "never", vocab: "tier" },
     contains: { title: "Contains", about: "Sensitive content flags.", editable: "never", vocab: "contains" },
@@ -80,7 +86,7 @@ const MULTI = new Set(["doc.entity", "doc.portco", "handling.contains", "parties
 export function buildLabelsPanel(names: { entity: Map<string, string>; portco: Map<string, string> }): PanelLabel[] {
   const published: PanelLabel[] = Object.entries(S).map(([lk, L]) => ({
     key: lk,
-    title: lk === "parties" ? "Parties (L11)" : lk === "version" ? "Version (L6)" : lk === "exec" && !L.fields.status ? `${L.title} (to be renamed Status & Execution)` : L.title,
+    title: lk === "parties" ? "Parties (L11)" : lk === "version" ? "Version (L6)" : lk === "published" ? "Published To (L10)" : lk === "exec" && !L.fields.status ? `${L.title} (to be renamed Status & Execution)` : L.title,
     about: LABEL_ABOUT[lk] ?? "",
     fields: Object.entries(L.fields).map(([fk, F]) => {
       const m = FIELD_META[lk]?.[fk] ?? { title: fk, about: "", editable: "machine" as Editable };
@@ -129,6 +135,17 @@ export function buildLabelsPanel(names: { entity: Map<string, string>; portco: M
       fields: Object.entries(FIELD_META.version).map(([key, m]) => ({
         key, title: m.title, about: m.about, type: key === "role" ? "pick list" : "text", multi: false, editable: "machine" as Editable, planned: true,
         choices: key === "role" ? Object.entries(VOCAB.version_role).map(([code, meaning]) => ({ code, meaning })) : [],
+      })),
+    });
+  }
+  // CAT-WO-05: L10 Published To, shown as planned until it is published on Drive
+  if (!S.published) {
+    published.push({
+      key: "published", title: "Published To (L10)", about: LABEL_ABOUT.published, planned: true,
+      fields: Object.entries(FIELD_META.published).map(([key, m]) => ({
+        key, title: m.title, about: m.about, type: key === "channel" ? "pick list" : key === "posted_date" ? "date" : "text", multi: key === "channel",
+        editable: "machine" as Editable, planned: true,
+        choices: key === "channel" ? Object.entries(VOCAB.published_channel).map(([code, meaning]) => ({ code, meaning })) : [],
       })),
     });
   }

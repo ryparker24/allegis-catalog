@@ -46,6 +46,10 @@ export function present<T extends DbRow>(r: LiveRow<T>) {
     family_id: (d.family_id as string | number | null | undefined) ?? null,
     version_role: (d.version_role as string | null | undefined) ?? null,
     versions: (d.versions as number | null | undefined) ?? null,
+    // CAT-WO-05: Published To (codes / dates only)
+    published_channels: (d.published_channels as string[] | null | undefined) ?? [],
+    published_date: (d.published_date as string | null | undefined) ?? null,
+    published_ids: (d.published_ids as string[] | null | undefined) ?? [],
     requires_execution: (d.requires_execution as boolean | null | undefined) ?? null,   // Review form: Stage vs Status
     signals: d.signals ?? null,
     confidence: d.confidence ?? null,
