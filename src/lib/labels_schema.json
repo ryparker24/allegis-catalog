@@ -730,5 +730,30 @@
     "type": "textOptions"
    }
   }
+ },
+ "published": {
+  "label_id": "9a7rs1gyMXPFhuQH8uPpgDPqQZ9i3apdegmSNNEbbFcb",
+  "title": "Published To",
+  "fields": {
+   "channel": {
+    "field_id": "ae49a190b1",
+    "type": "selectionOptions",
+    "multi": true,
+    "choices": {
+     "lp_portal": "ee433f9cb3",
+     "gp_portal": "c68f80421a",
+     "datum": "4b62167e3e",
+     "email": "2af264feda"
+    }
+   },
+   "posted_date": {
+    "field_id": "670332b6c5",
+    "type": "dateOptions"
+   },
+   "posting_id": {
+    "field_id": "05c1ffcc27",
+    "type": "textOptions"
+   }
+  }
  }
 }
