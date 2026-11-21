@@ -182,6 +182,13 @@ def run(conn, ruled=None, apply=True, log=print):
     # so the Superseded status it sets is in place before the read-back / re-sync of the same night (else this step's
     # status reset above would be pushed to Drive and flipped back the next night).
     cur = conn.cursor()
+    # CAT-WO-06 item 2: first-page reading, after kinds are set and before families / subject / requirements. Incremental,
+    # capped per night; a Drive / OCR failure is reported and never stops the derive. Then the content check (fill blanks).
+    cur.execute("SELECT to_regclass('cat.doc_page_read') IS NOT NULL")
+    if cur.fetchone()[0]:
+        import pages_wo06
+        pages_wo06.nightly_step(conn, log=log)
+        cur = conn.cursor()
     cur.execute("SELECT to_regclass('cat.doc_family_member') IS NOT NULL")
     if cur.fetchone()[0]:
         import families_wo04

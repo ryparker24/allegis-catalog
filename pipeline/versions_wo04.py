@@ -170,6 +170,8 @@ def build(members, tokens=None):
     by = {}
     for m in members:
         st, hits, marks = tokens.stem(m["name"])
+        if m.get("content_amended") and m.get("kind") == K1_KIND and "VT-corrected" not in hits:
+            hits = list(hits) + ["VT-corrected"]          # CAT-WO-06: the Amended K-1 box on page 1 is a version marker
         m["stem"], m["hits"], m["marks"] = st, hits, marks
         if not eligible(m) or not st:
             continue
@@ -253,7 +255,7 @@ def k1_family(g):
     """K-1s join a family only through an amended / corrected K-1 for the same partner and year (same subject and
     period are already in the key; the subject must be known)."""
     if len(g) < 2 or subj(g[0]) is None: return g[:1] if len(g) == 1 else []
-    if not any(K1_AMENDED.search(m["name"] or "") for m in g): return []
+    if not any(K1_AMENDED.search(m["name"] or "") or m.get("content_amended") for m in g): return []
     return g
 
 

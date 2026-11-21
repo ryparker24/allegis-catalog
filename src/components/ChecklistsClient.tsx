@@ -12,11 +12,12 @@ type Req = {
   req_key: string; rule_id: string; entity_code: string; partner_code: string | null; partner_name: string | null; fiscal_year: number | null;
   fiscal_quarter: number | null; result: string; sub_status: string | null; urgency: number; best: Doc; best_kind: string | null; best_stage: string | null;
   best_status: string | null; best_date: string | null; best_reason: string | null; best_source: string | null; n_candidates: number;
+  best_page?: number | null;   // CAT-WO-06: the statement's page inside a PCAP package / K-1 bundle
   override_action: string | null; override_note: string | null; override_by: string | null; override_at: string | null;
 };
 type Rule = { id: string; checklist: string; title: string; subtype: string | null; subject: string };
 type Resp = { rules: Rule[]; entities: string[]; years: number[]; quarters: boolean; counts: Record<string, number>; matched: number; rows: Req[]; canWrite: boolean };
-type Cand = { kind: string; stage: string | null; status: string | null; date: string | null; satisfying: boolean; partner_conf: string | null; is_primary: boolean; doc: Doc; location?: string | null; location_folder_id?: string | null; other_locations?: number | null };
+type Cand = { page?: number | null; kind: string; stage: string | null; status: string | null; date: string | null; satisfying: boolean; partner_conf: string | null; is_primary: boolean; doc: Doc; location?: string | null; location_folder_id?: string | null; other_locations?: number | null };
 type State = { rule: string; entity: string | null; fy: number | null; q: number | null; results: string[]; sort: string; dir: "asc" | "desc"; pageSize: number; widths: Record<string, number>; tab: "rows" | "gaps" };
 const DEFAULT: State = { rule: "LP-SUB", entity: null, fy: null, q: null, results: [], sort: "urgency", dir: "asc", pageSize: 25, widths: {}, tab: "rows" };
 
@@ -51,6 +52,10 @@ export function period(r: { fiscal_year: number | null; fiscal_quarter: number |
 export function requirementLabel(r: Req, rule?: Rule) {
   const who = r.partner_code ? ` · ${r.partner_code}${r.partner_name && !maskNames() ? ` ${r.partner_name}` : ""}` : "";
   return `${r.entity_code}${who}${period(r) ? ` · ${period(r)}` : ""}${rule ? ` · ${rule.title.toLowerCase()}` : ""}`;
+}
+/** CAT-WO-06: "p. N" beside the best-document link of a package row */
+export function pageTag(d: Doc, page: number | null | undefined) {
+  return page && d && d.access === "ok" ? <span className="muted small page-tag"> p. {page}</span> : null;
 }
 export function docCell(d: Doc) {
   if (!d) return <span className="muted">-</span>;
@@ -217,7 +222,7 @@ export function ChecklistsClient() {
                         onKeyDown={(e) => { if (e.key === "Enter") setOpen(r); }}>
                         <td className="name" title={requirementLabel(r)}>{requirementLabel(r)}</td>
                         <td><span className={`res ${RESULT[r.result]?.cls ?? ""}`}>{RESULT[r.result]?.dot} {RESULT[r.result]?.label ?? r.result}</span>{r.sub_status ? <div className="muted small">{SUB[r.sub_status] ?? r.sub_status}</div> : null}</td>
-                        <td className="name">{docCell(r.best)}</td>
+                        <td className="name">{docCell(r.best)}{pageTag(r.best, r.best_page)}</td>
                         <td>{r.best_kind ? display("kind", r.best_kind) : ""}</td>
                         <td>{r.best_stage && r.best_stage !== "n_a" ? display("stage", r.best_stage) : r.best_status ? display("status", r.best_status) : ""}</td>
                         <td>{r.best_date ? String(r.best_date).slice(0, 10) : ""}</td>
@@ -296,14 +301,14 @@ function RowPanel({ r, rule, onClose, onChanged }: { r: Req; rule?: Rule; onClos
       </div>
       <div className="panel-body req-panel">
       <p><span className={`res ${RESULT[r.result]?.cls ?? ""}`}>{RESULT[r.result]?.dot} {RESULT[r.result]?.label}</span> {r.sub_status ? <span className="muted small">· {SUB[r.sub_status] ?? r.sub_status}</span> : null}</p>
-      <p className="small"><b>Best document:</b> {docCell(r.best)}{r.best_reason ? <><br /><span className="muted">{r.best_reason}</span></> : null}</p>
+      <p className="small"><b>Best document:</b> {docCell(r.best)}{pageTag(r.best, r.best_page)}{r.best_reason ? <><br /><span className="muted">{r.best_reason}</span></> : null}</p>
       {r.override_action ? <p className="small"><b>Override:</b> {r.override_action === "link" ? "linked" : "not required"} by {r.override_by} on {String(r.override_at ?? "").slice(0, 10)}{r.override_note ? ` - ${r.override_note}` : ""}</p> : null}
       <h3 className="cap">Candidates {cands ? `(${cands.candidates.length})` : ""}</h3>
       {cands?.candidates.length ? (
         <ul className="cands">
           {cands.candidates.map((c, i) => (
             <li key={i}>
-              {docCell(c.doc)}{c.location ? <> <LocationCell location={c.location} folderId={c.location_folder_id} other={c.other_locations} /></> : null} <span className="muted small">· {display("kind", c.kind)}{c.stage && c.stage !== "n_a" ? ` · ${display("stage", c.stage)}` : ""}{c.status ? ` · ${display("status", c.status)}` : ""}{c.date ? ` · ${c.date}` : ""}{c.partner_conf ? ` · partner match ${c.partner_conf}` : ""}{c.satisfying ? " · qualifies" : ""}</span>
+              {docCell(c.doc)}{pageTag(c.doc, c.page)}{c.location ? <> <LocationCell location={c.location} folderId={c.location_folder_id} other={c.other_locations} /></> : null} <span className="muted small">· {display("kind", c.kind)}{c.stage && c.stage !== "n_a" ? ` · ${display("stage", c.stage)}` : ""}{c.status ? ` · ${display("status", c.status)}` : ""}{c.date ? ` · ${c.date}` : ""}{c.partner_conf ? ` · partner match ${c.partner_conf}` : ""}{c.satisfying ? " · qualifies" : ""}</span>
               {c.doc && c.doc.access === "ok" ? <button className="btn small" disabled={busy} onClick={() => post({ action: "link", file_id: (c.doc as { file_id: string }).file_id })}>This is the one</button> : null}
             </li>
           ))}

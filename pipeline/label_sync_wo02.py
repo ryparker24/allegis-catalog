@@ -289,7 +289,7 @@ def resync(connect, svc, schema, apply=False, only=None, log=print, sleep=time.s
             write, skip = plan_resync(e, d, st["machine"], st.get("person_fields") or [], fields)
             if fid in hold_entities and "entities" in write:
                 write = [f for f in write if f != "entities"]; held.add(fid)   # a set: the per-batch re-plan calls this again
-            e["_handling_raise"] = cl.handling_raise(e, d, schema)            # CAT-WO-03 R-026 personnel: only ever raises
+            e["_handling_raise"] = cl.handling_raise(e, d, schema, st.get("machine"))   # R-026 personnel / R-037 content flags: only ever raises
             if e["_handling_raise"]:
                 write = write + ["_handling"]
             return write, skip, e

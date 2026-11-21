@@ -47,6 +47,8 @@ export interface Row {
   version_role?: string | null;
   versions?: number | null;
   subject_candidates?: string[] | null;
+  subject_reasons?: string[] | null;     // CAT-WO-06: Match subject reason codes (content)
+  content_disagrees?: string[] | null;   // CAT-WO-06: fiscal_year / period / entity
   signed_date: string | null;
   effective_date: string | null;
   is_primary: boolean | null;

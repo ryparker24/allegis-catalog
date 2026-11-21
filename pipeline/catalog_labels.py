@@ -186,6 +186,7 @@ def expected(r, schema):
         "published_ids": sorted(x for x in (r.get("published_ids") or []) if POSTING_ID.match(x)),
         "tier": r.get("handling"), "contains": ["lp_pii"] if r.get("pii_lp") else [],
         "_personnel": bool(r.get("personnel")),
+        "_content_contains": sorted(x for x in (r.get("content_flags") or []) if x in ("tax_id", "lp_pii")),   # CAT-WO-06 R-037
     }
     # a choice that does not exist on the published label cannot be written: the machine writes nothing for it.
     # "_unwritable" lists those fields so the RE-SYNC leaves them alone instead of clearing the live value
@@ -206,20 +207,29 @@ def expected(r, schema):
     return e
 
 
-def handling_raise(e, live, schema):
+def handling_raise(e, live, schema, machine=None):
     """R-026: a personnel document gets Handling Tier = Restricted and Contains + Personnel info. The machine only ever
-    RAISES Handling: never to secret, never lowers a tier, never removes a Contains choice. -> {field: value} to write."""
-    if not e.get("_personnel") or not schema.has("contains"):
+    RAISES Handling: never to secret, never lowers a tier, never removes a Contains choice. -> {field: value} to write.
+    CAT-WO-06 R-037: Contains + Tax ID / LP PII from page 1 (presence only), tier unchanged. A flag the machine wrote
+    before (in the machine snapshot) that is no longer on the file was removed by a person: never added back."""
+    if not schema.has("contains"):
         return {}
     ch = schema.S["handling"]["fields"]["contains"].get("choices") or {}
-    if "personnel" not in ch:
-        return {}                                           # the Personnel info choice is not published yet
     out = {}
-    tier_ch = ((schema.S["handling"]["fields"].get("tier") or {}).get("choices") or {}) if schema.has("tier") else {}
-    if live.get("tier") in (None, "normal") and "restricted" in tier_ch:
-        out["tier"] = "restricted"
-    if "personnel" not in (live.get("contains") or []):
-        out["contains"] = sorted(set(live.get("contains") or []) | {"personnel"})
+    have = set(live.get("contains") or [])
+    add = set()
+    if e.get("_personnel") and "personnel" in ch:           # the Personnel info choice must be published
+        tier_ch = ((schema.S["handling"]["fields"].get("tier") or {}).get("choices") or {}) if schema.has("tier") else {}
+        if live.get("tier") in (None, "normal") and "restricted" in tier_ch:
+            out["tier"] = "restricted"
+        if "personnel" not in have:
+            add.add("personnel")
+    wrote_before = set((machine or {}).get("contains") or [])
+    for f in e.get("_content_contains") or []:
+        if f in ch and f not in have and f not in wrote_before:
+            add.add(f)
+    if add:
+        out["contains"] = sorted(have | add)
     return out
 
 
@@ -305,6 +315,7 @@ SELECT f.file_id, f.handling, d.document_id,
        CASE WHEN vf.confidence IN ('high', 'person') THEN vm.supersedes END AS version_supersedes,
        CASE WHEN vf.confidence IN ('high', 'person') THEN vm.amends END AS version_amends,
        d.published_channels_auto AS published_channels, d.published_date_auto AS published_date, d.published_ids_auto AS published_ids,
+       d.content_flags,
        d.updated_at
 FROM cat.file f
 LEFT JOIN cat.file_document fd ON fd.file_id=f.file_id
@@ -353,6 +364,9 @@ def catalog_rows(cur, ids, v1=False, v2=None):
     cur.execute("SELECT to_regclass('cat.doc_family_member') IS NOT NULL")
     if not cur.fetchone()[0]:
         q = _NO_FAMILY(q)
+    cur.execute("SELECT 1 FROM information_schema.columns WHERE table_schema='cat' AND table_name='document' AND column_name='content_flags'")
+    if cur.fetchone() is None:   # before migration 009 (CAT-WO-06)
+        q = q.replace("d.content_flags,", "NULL::text[] AS content_flags,")
     cur.execute(q, (list(ids),))
     cols = [c.name for c in cur.description]
     return {r[0]: dict(zip(cols, r)) for r in cur.fetchall()}

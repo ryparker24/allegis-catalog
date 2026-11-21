@@ -166,10 +166,14 @@ def load(cur):
     party = [dict(zip(["entity", "partner", "ckind", "interest", "is_gp"], r)) for r in cur.fetchall()]
     cur.execute("SELECT entity_code, entity_type FROM ref.entity WHERE active IS NOT FALSE")
     etype = dict(cur.fetchall())
-    cur.execute("SELECT document_id, partner_code, confidence FROM cat.doc_party")
+    cur.execute("SELECT 1 FROM information_schema.columns WHERE table_schema='cat' AND table_name='doc_party' AND column_name='page_from'")
+    has_page = cur.fetchone() is not None                 # CAT-WO-06 (migration 009): the page inside a package / bundle
+    cur.execute("SELECT document_id, partner_code, confidence, " + ("page_from" if has_page else "NULL::int") + " FROM cat.doc_party")
     dparty = collections.defaultdict(dict)
-    for d, p, c in cur.fetchall():
+    dpage = {}
+    for d, p, c, pg in cur.fetchall():
         dparty[d][p] = c
+        if pg: dpage[(d, p)] = pg
     cur.execute(WRONG_SQL)
     wrong = {r[0] for r in cur.fetchall()}
     cur.execute("SELECT DISTINCT ON (req_key) req_key, override_id, action, file_id, document_id FROM app.requirement_override ORDER BY req_key, override_id DESC")
@@ -189,7 +193,7 @@ def load(cur):
     cur.execute("""SELECT entity_code, min(extract(year FROM commitment_date))::int FROM ref.party
                    WHERE entity_code IS NOT NULL AND commitment_date IS NOT NULL GROUP BY 1""")
     party_first = dict(cur.fetchall())
-    return rules, sk, app, party, etype, dparty, wrong, overrides, docs, party_first
+    return rules, sk, app, party, etype, dparty, wrong, overrides, docs, party_first, dpage
 
 
 def subjects(rule, app, party, etype, today, first_fy=None):
@@ -267,7 +271,7 @@ def subjects(rule, app, party, etype, today, first_fy=None):
 
 
 def build(cur, today, log=print):
-    rules, sk, app, party, etype, dparty, wrong, overrides, docs, first_fy = load(cur)
+    rules, sk, app, party, etype, dparty, wrong, overrides, docs, first_fy, dpage = load(cur)
     by_entity = collections.defaultdict(list)
     for d in docs:
         if d["document_id"] in wrong:
@@ -313,7 +317,8 @@ def build(cur, today, log=print):
                               "status": d["status"], "period": d["period"], "is_primary": bool(d["is_primary"]), "partner_conf": conf,
                               "date": d["dt"].isoformat() if d["dt"] else None, "date_ord": d["dt"].toordinal() if d["dt"] else None,
                               "kind_satisfying": d["kind"] in sat_kinds,
-                              "version_role": d.get("version_role"), "supersedes": d.get("supersedes")})
+                              "version_role": d.get("version_role"), "supersedes": d.get("supersedes"),
+                              "page": dpage.get((d["document_id"], p)) if p is not None else None})
             ov = overrides.get(key)
             link_doc = None
             if ov and ov["action"] == "link":
@@ -353,22 +358,25 @@ def reason(best, result, sub):
 
 
 def write(cur, run, rows):
+    cur.execute("SELECT 1 FROM information_schema.columns WHERE table_schema='ops' AND table_name='requirement' AND column_name='best_page'")
+    has_page = cur.fetchone() is not None
     cur.execute("DELETE FROM ops.requirement")   # not TRUNCATE: no ACCESS EXCLUSIVE lock, app reads keep working (coder review)
     data = []
     for r in rows:
         b = r["best"]
         cj = [{k: c.get(k) for k in ("document_id", "file_id", "kind", "stage", "status", "date", "satisfying", "partner_conf", "is_primary",
-                                     "version_role", "supersedes", "amends")}
+                                     "version_role", "supersedes", "amends", "page")}
               for c in r["cands"][:MAX_CANDIDATES]]
         data.append((r["req_key"], r["rule_id"], r["rule_version"], r["checklist"], r["subtype_code"], r["subject_type"], r["entity_code"],
                      r["partner_code"], r["fiscal_year"], r["fiscal_quarter"], r["result"], r["sub_status"], r["urgency"],
                      b and b.get("document_id"), b and b.get("file_id"), b and b.get("kind"), b and b.get("stage"), b and b.get("status"),
                      b and b.get("date"), reason(b, r["result"], r["sub_status"]), b and ("person" if b.get("source") == "person" else "auto"),
-                     json.dumps(cj), len(r["cands"]), r["override_id"], run))
-    cur.executemany("""INSERT INTO ops.requirement (req_key, rule_id, rule_version, checklist, subtype_code, subject_type, entity_code,
-                         partner_code, fiscal_year, fiscal_quarter, result, sub_status, urgency, best_document_id, best_file_id, best_kind,
-                         best_stage, best_status, best_date, best_reason, best_source, candidates, n_candidates, override_id, built_run)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s)""", data)
+                     json.dumps(cj), len(r["cands"]), r["override_id"], run, b and b.get("page")))
+    cols = ("req_key, rule_id, rule_version, checklist, subtype_code, subject_type, entity_code, partner_code, fiscal_year, fiscal_quarter, "
+            "result, sub_status, urgency, best_document_id, best_file_id, best_kind, best_stage, best_status, best_date, best_reason, best_source, "
+            "candidates, n_candidates, override_id, built_run" + (", best_page" if has_page else ""))
+    vals = "%s," * 21 + "%s::jsonb,%s,%s,%s" + (",%s" if has_page else "")
+    cur.executemany(f"INSERT INTO ops.requirement ({cols}) VALUES ({vals})", data if has_page else [x[:-1] for x in data])
 
 
 def main():

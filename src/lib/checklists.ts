@@ -96,7 +96,7 @@ export function checklistQuery(s: ChecklistSpec): { sql: string; countsSql: stri
     params, scopeParams,
     // names: app.v_party only (display name beside the code; to the screen, never logged)
     sql: `SELECT r.req_key, r.rule_id, r.entity_code, r.partner_code, r.fiscal_year, r.fiscal_quarter, r.result, r.sub_status, r.urgency,
-                 r.best_file_id, r.best_kind, r.best_stage, r.best_status, r.best_date, r.best_reason, r.best_source, r.best_out_of_scope,
+                 r.best_file_id, r.best_kind, r.best_stage, r.best_status, r.best_date, r.best_reason, r.best_source, r.best_out_of_scope, r.best_page,
                  r.n_candidates, r.override_action, r.override_note, r.override_by, r.override_at,
                  (SELECT v.display_name FROM app.v_party v WHERE v.entity_code = r.entity_code AND v.partner_code = r.partner_code LIMIT 1) AS partner_name,
                  count(*) OVER ()::int AS matched

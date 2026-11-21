@@ -194,7 +194,7 @@ try:
     cl.read_labels = lambda svc, ids, inc, on_item=None: [on_item(i, {"http": 200, "labelInfo": {"s": "final"}}) for i in ids]
     ls.plan_resync = lambda e, d, m, p, f: ((["status"], []) if True else ([], []))
     cl.expected = lambda row, schema: {}
-    cl.handling_raise = lambda e, d, schema: None
+    cl.handling_raise = lambda e, d, schema, machine=None: None
     r_small = ls.resync(lambda: _Conn2(), None, _Schema2(), apply=False, only=_ids, log=lambda *a: None, segment=2)
     small_loads = list(_loaded); _loaded.clear()
     r_big = ls.resync(lambda: _Conn2(), None, _Schema2(), apply=False, only=_ids, log=lambda *a: None, segment=1000)

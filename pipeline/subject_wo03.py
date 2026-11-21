@@ -155,6 +155,104 @@ def match_doc(idx, entities, file_names, folder_segments):
     return "low", [(p, cands[p], "name" if p in by_name else "folder" if p in by_folder else "name") for p in low]
 
 
+LABEL_TEXT_MAX = 100       # CAT-WO-06: the longest Subject code(s) text written to the label (measured: see HANDOFF)
+MAX_CODES = 20             # cat.document CHECK document_subject_codes
+
+
+def fits_label(codes):
+    """a code list that doesn't fit the label's text field is written as none (the DB keeps the page map)."""
+    import catalog_labels as cl
+    return len(codes) <= MAX_CODES and len(cl.codes_to_text(codes)) <= LABEL_TEXT_MAX
+
+
+def merge_content(outcome, matches, rule, person_codes, portal_codes, crow, decided_after_read, roster_ok):
+    """CAT-WO-06 R-034 / R-035 / R-036. Pure.
+    crow: content candidate rows (dicts: seq, cand, page_from, page_to, anchor, partner, roster_entity, confidence, reason).
+    -> (outcome, matches, rule, pages {partner: (page_from, page_to, anchor)}, low_rows [(partner, entity, page_from, page_to,
+       anchor, reason)], lane {(seq, cand): (lane, reason)}).
+      - a person's Subject wins: a content HIGH match for another code -> lane CONFLICT_PERSON, nothing overwritten
+      - a portal-derived code (R-031) wins the same way -> CONFLICT_PORTAL
+      - content HIGH replaces a folder / name / parties machine match (one row per partner; packages: many)
+      - medium / MULTIPLE (on the roster) -> low rows (Match subject; the checklist shows 'partner unconfirmed')
+      - NOT_IN_FUND -> lane only, never a row; NO_ROSTER_MATCH -> lane only when the document has a roster (a checklist
+        candidate) and nothing else matched
+      - a person's decision made after the read takes every row out of the lane"""
+    pages, low_rows, lane = {}, [], {}
+    highs = {}
+    for r in crow:
+        if r["confidence"] == "high" and r["partner"]:
+            highs.setdefault(r["partner"], r)
+
+    def pg(r):
+        return (r["page_from"], r["page_to"], r["anchor"])
+
+    def put(r, on, reason=None):
+        if reason is None:            # a conflict that no longer holds goes back to the read's own reason
+            reason = None if (r["reason"] or "").startswith("CONFLICT_") else r["reason"]
+        lane[(r["seq"], r["cand"])] = (bool(on) and not decided_after_read, reason)
+
+    if person_codes is not None or portal_codes:
+        ref, why = (set(person_codes), "CONFLICT_PERSON") if person_codes is not None else (set(portal_codes), "CONFLICT_PORTAL")
+        for r in crow:
+            if r["partner"] in ref:
+                pages.setdefault(r["partner"], pg(r)); put(r, False)
+            elif r["confidence"] == "high":
+                put(r, True, why)
+            else:
+                put(r, False)
+        return outcome, matches, rule, pages, low_rows, lane
+    if highs:
+        matches = [(p, r["roster_entity"], "content") for p, r in sorted(highs.items())]
+        pages = {p: pg(r) for p, r in highs.items()}
+        outcome, rule = "high", "SUBJ-CONTENT"
+        for r in crow:
+            if r["confidence"] == "high":
+                put(r, False)
+            elif r["partner"] and r["roster_entity"] and r["partner"] not in highs and r["reason"] in (None, "MULTIPLE"):
+                low_rows.append((r["partner"], r["roster_entity"], r["page_from"], r["page_to"], r["anchor"], r["reason"]))
+                put(r, True)                                  # a package statement still to confirm
+            else:
+                put(r, False)
+        return outcome, matches, rule, pages, low_rows, lane
+    have_high = outcome == "high"
+    for r in crow:
+        if have_high:
+            if r["partner"] in {m[0] for m in matches}:
+                pages.setdefault(r["partner"], pg(r))
+            put(r, False)
+        elif r["partner"] and r["roster_entity"] and r["reason"] in (None, "MULTIPLE"):
+            low_rows.append((r["partner"], r["roster_entity"], r["page_from"], r["page_to"], r["anchor"], r["reason"]))
+            put(r, True)
+        elif r["reason"] == "NOT_IN_FUND":
+            put(r, True)
+        elif r["reason"] == "NO_ROSTER_MATCH":
+            put(r, roster_ok and not matches)
+        else:
+            put(r, False)
+    if low_rows and outcome in ("none", "not_a_roster_kind", "no_roster"):
+        outcome, rule = "low", "SUBJ-CONTENT-LOW"
+    return outcome, matches, rule, pages, low_rows, lane
+
+
+CONTENT_SQL = """
+SELECT m.document_id, m.seq, m.cand, m.page_from, m.page_to, m.anchor, m.partner_code, m.roster_entity, m.confidence, m.reason,
+       (SELECT max(e.created_at) FROM app.review_event e WHERE e.document_id = m.document_id AND e.source = 'match_subject') > r.read_at AS decided
+FROM cat.doc_content_match m JOIN cat.doc_page_read r ON r.document_id = m.document_id
+"""
+
+
+def load_content(cur):
+    cur.execute("SELECT to_regclass('cat.doc_content_match') IS NOT NULL")
+    if not cur.fetchone()[0]:
+        return {}, {}
+    cur.execute(CONTENT_SQL)
+    out, decided = collections.defaultdict(list), {}
+    for did, seq, cand, pf, pt, an, p, e, conf, reason, dec in cur.fetchall():
+        out[did].append(dict(seq=seq, cand=cand, page_from=pf, page_to=pt, anchor=an, partner=p, roster_entity=e, confidence=conf, reason=reason))
+        decided[did] = bool(dec)
+    return out, decided
+
+
 def personnel(file_names):
     return any(PERSONNEL_NAME.search(n or "") for n in file_names)
 
@@ -295,11 +393,39 @@ def run(conn, apply=False, staff=None, log=print):
         if rule == "SUBJ-PARTIES" and crowd[(matches[0][1], matches[0][0], r[2])] > PARTIES_MAX:
             results[did] = (r, "low", matches, "SUBJ-PARTIES-CROWDED", person_codes, roster_doc, is_pers, names)
             downgraded += 1
+    # CAT-WO-06: content matches (first-page reading) per R-034 / R-035 / R-036
+    content, decided = load_content(cur)
+    cpages, clow, lane_upd = {}, {}, []
+    over_label = 0
+    roster_entities_all = set(idx.by_entity)
+    for did, crow in content.items():
+        if did not in results:
+            continue
+        r, outcome, matches, rule, person_codes, roster_doc, is_pers, names = results[did]
+        _, kind, fy, ent_conf, issuing, receiving, *_rest = r
+        ents_doc = set(ent_conf) if ent_conf is not None else set(ents.get(did, ()))
+        if issuing: ents_doc.add(issuing)
+        portal_codes = {p for p, _e, _h in portal.get(did, ())} if person_codes is None else set()
+        outcome, matches, rule, pages, low_rows, lane = merge_content(outcome, matches, rule, person_codes, portal_codes, crow,
+                                                                      decided.get(did, False), bool(ents_doc & roster_entities_all))
+        results[did] = (r, outcome, matches, rule, person_codes, roster_doc or bool(pages), is_pers, names)
+        cpages[did], clow[did] = pages, low_rows
+        lane_upd += [(did, s, c, on, why) for (s, c), (on, why) in lane.items()]
     for did, (r, outcome, matches, rule, person_codes, roster_doc, is_pers, names) in results.items():
         _, kind, fy, ent_conf, issuing, receiving, conf, auto_old, person_old, rule_old, pers_old, labelled = r
         auto = sorted(p for p, _, m in matches) if outcome == "high" else None
+        if auto and not fits_label(auto):
+            auto, rule = None, (rule or "SUBJ") + "-OVER-LABEL"        # the DB keeps the page map; the label gets none
+            over_label += 1
+        pages = cpages.get(did, {})
+        have = set()
         for p, e, m in matches:
-            rows_party.append((did, p, e, m, "confirmed" if outcome.startswith("confirmed") else outcome))
+            pf, pt, an = pages.get(p, (None, None, None))
+            rows_party.append((did, p, e, m, "confirmed" if outcome.startswith("confirmed") else outcome, pf, pt, an, None))
+            have.add(p)
+        for p, e, pf, pt, an, why in clow.get(did, ()):
+            if p not in have:
+                rows_party.append((did, p, e, "content", "low", pf, pt, an, why)); have.add(p)
         # without the directory (no --directory-token) the last machine value is KEPT, never cleared (coder review)
         sp = (staff_match(staff, names) if is_pers else None) if staff is not None else person_old
         if (auto or None) != (auto_old or None) or sp != person_old or rule != rule_old or bool(is_pers) != bool(pers_old):
@@ -312,7 +438,21 @@ def run(conn, apply=False, staff=None, log=print):
             cover[k]["both" if has_code and has_person else "code" if has_code else "person" if has_person else "none"] += 1
     if apply:
         cur.execute("TRUNCATE cat.doc_party")
-        cur.executemany("INSERT INTO cat.doc_party (document_id, partner_code, entity_code, method, confidence) VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", rows_party)
+        cur.execute("SELECT 1 FROM information_schema.columns WHERE table_schema='cat' AND table_name='doc_party' AND column_name='page_from'")
+        if cur.fetchone():
+            cur.executemany("""INSERT INTO cat.doc_party (document_id, partner_code, entity_code, method, confidence, page_from, page_to, anchor, reason)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""", rows_party)
+        else:   # before migration 009
+            cur.executemany("INSERT INTO cat.doc_party (document_id, partner_code, entity_code, method, confidence) VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                            [x[:5] for x in rows_party])
+        if lane_upd:
+            cur.execute("CREATE TEMP TABLE _lane (document_id bigint, seq smallint, cand smallint, lane boolean, reason text) ON COMMIT DROP")
+            with cur.copy("COPY _lane FROM STDIN") as cp:
+                cp.set_types(["int8", "int2", "int2", "bool", "text"])
+                for x in lane_upd: cp.write_row(x)
+            cur.execute("""UPDATE cat.doc_content_match m SET lane = l.lane, reason = l.reason FROM _lane l
+                           WHERE m.document_id = l.document_id AND m.seq = l.seq AND m.cand = l.cand
+                             AND (m.lane, m.reason) IS DISTINCT FROM (l.lane, l.reason)""")
         cur.executemany("UPDATE cat.document SET subject_codes_auto=%s, subject_person_auto=%s, subject_rule=%s, personnel_auto=%s, updated_at=now() WHERE document_id=%s", upd)
         # app decisions newer than the last read-back become the person's values ('{}' = "none"; a cleared person = NULL)
         cur.executemany("UPDATE cat.document SET subject_codes_confirmed=%s::text[], updated_at=now() WHERE document_id=%s", [(v, d) for d, v in ev_codes.items()])
@@ -322,6 +462,12 @@ def run(conn, apply=False, staff=None, log=print):
         conn.rollback()
     log(f"SUBJECT {'APPLIED' if apply else 'DRY RUN (nothing written)'}: documents {len(docs):,} · doc_party rows {len(rows_party):,} · "
         f"documents changed {len(upd):,} · K1-R2 parties matches sent to Match subject (crowded fund/GP/year) {downgraded:,} · staff directory {'used' if staff else 'not available (skipped)'} · {time.time() - t0:.0f}s")
+    if content:
+        lane_n = collections.Counter(why or "MEDIUM" for _d, _s, _c, on, why in lane_upd if on)
+        log(f"  content (CAT-WO-06): documents read with candidates {len(content):,} · content high documents "
+            f"{sum(1 for d, (r, o, m, ru, *_x) in results.items() if ru and ru.startswith('SUBJ-CONTENT') and o == 'high'):,} · "
+            f"code lists too long for the label (written as none) {over_label:,} · lane rows by reason: "
+            + (", ".join(f"{k} {v:,}" for k, v in sorted(lane_n.items())) or "none"))
     log("  labelled documents by kind: outcome (high / low / none / no_roster / confirmed)")
     for k in sorted(rep, key=lambda k: -sum(rep[k].values())):
         v = rep[k]

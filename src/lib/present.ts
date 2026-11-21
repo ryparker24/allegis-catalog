@@ -32,6 +32,8 @@ export function present<T extends DbRow>(r: LiveRow<T>) {
     subject_codes: hasField("parties", "subject_codes") ? L.subject_codes : ((d.subject_codes as string[] | null) ?? []),
     subject_person: hasField("parties", "subject_person") ? L.subject_person : ((d.subject_person as string | null) ?? null),
     subject_candidates: (d.subject_candidates as string[] | null | undefined) ?? null,   // Match subject lane: codes
+    subject_reasons: (d.subject_reasons as string[] | null | undefined) ?? null,         // CAT-WO-06: content reason codes
+    content_disagrees: (d.content_disagrees as string[] | null | undefined) ?? null,     // CAT-WO-06: fiscal_year / period / entity
     signed_date: d.signed_date ?? null,
     effective_date: d.effective_date ?? null,
     is_primary: d.is_primary ?? null,

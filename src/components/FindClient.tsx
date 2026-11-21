@@ -6,6 +6,7 @@ import { BulkEditDialog, EditForm, editInfo, type FieldInfo } from "./EditForm";
 import { SubjectForm } from "./SubjectForm";
 import { VersionsPanel } from "./Versions";
 import { PostingsPanel } from "./Postings";
+import { ContentPanel } from "./ContentMatches";
 import { PageHeader } from "./AppShell";
 import { useOutside } from "./ViewTree";
 import { emit, EV, on, shownName, type ViewRef } from "./bus";
@@ -698,6 +699,7 @@ export function FindClient() {
             <VersionsPanel row={open} onChanged={() => run(spec)} />
             {/* CAT-WO-05: where and when the document was posted (channel, date, posting ID; no partner) */}
             <PostingsPanel row={open} />
+            <ContentPanel row={open} />
             {/* CAT-WO-03 R-026: set or correct the document's Subject (roster codes / a staff account) */}
             <SubjectForm row={open} onSaved={(patch) => {
               const upd = { ...open, ...patch } as Row;          // the panel shows the saved subject at once (coder review)

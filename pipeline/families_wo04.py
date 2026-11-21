@@ -30,12 +30,15 @@ def load_tokens(cur):
 def load_members(conn, batch=2000):
     """one dict per labelled document (its primary copy decides name / shared drive), streamed in batches"""
     out, seen = [], set()
+    with conn.cursor() as c0:   # CAT-WO-06: the Amended K-1 box read from page 1 (migration 009) counts like "amended" in the name
+        c0.execute("SELECT 1 FROM information_schema.columns WHERE table_schema='cat' AND table_name='doc_content_check' AND column_name='content_amended'")
+        amd = "coalesce((SELECT cc.content_amended FROM cat.doc_content_check cc WHERE cc.document_id = v.document_id), false)" if c0.fetchone() else "false"
     with conn.cursor(name="wo04_members") as cur:
         cur.itersize = batch
         cur.execute("""SELECT v.document_id, f.name, v.kind, v.entities, v.subject_codes, v.subject_person,
                               v.fiscal_year, v.period, v.effective_date, f.modified_time, v.stage, v.status,
                               f.drive_id IS NOT NULL, d.status_confirmed IS NOT NULL,
-                              d.status_confirmed IS NULL AND d.status_rule = 'VF-superseded'
+                              d.status_confirmed IS NULL AND d.status_rule = 'VF-superseded', """ + amd + """
                        FROM app.v_find_x v JOIN cat.file f USING (file_id) JOIN cat.document d ON d.document_id = v.document_id
                        WHERE v.document_id IS NOT NULL
                        ORDER BY v.document_id, v.is_primary DESC, f.drive_id IS NOT NULL DESC, f.modified_time DESC NULLS LAST""")
@@ -44,7 +47,7 @@ def load_members(conn, batch=2000):
             seen.add(r[0])
             out.append(dict(document_id=r[0], name=r[1], kind=r[2], entities=r[3], subject_codes=r[4], subject_person=r[5],
                             fy=r[6], period=r[7], effective_date=r[8], modified_time=r[9], stage=r[10], status=None if r[14] else r[11],   # never ranked on the Superseded this step set
-                            shared=r[12], status_person=r[13], person=None))
+                            shared=r[12], status_person=r[13], person=None, content_amended=bool(r[15])))
     return out
 
 

@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { accessFor, REQ_KEY, shownDoc } from "@/lib/checklists";
 
 export const dynamic = "force-dynamic";
-type Cand = { document_id: number; file_id: string; kind: string; stage: string | null; status: string | null; date: string | null; satisfying: boolean; partner_conf: string | null; is_primary: boolean };
+type Cand = { document_id: number; file_id: string; kind: string; stage: string | null; status: string | null; date: string | null; satisfying: boolean; partner_conf: string | null; is_primary: boolean; page?: number | null };
 
 /** GET /api/checklists/candidates?key=<req_key> -> the row's candidates (runners-up included), each live-checked as the user. */
 export async function GET(req: Request) {

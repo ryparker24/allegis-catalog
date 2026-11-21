@@ -12,11 +12,18 @@ import { SubjectForm } from "./SubjectForm";
 import { LinkVersionsLane } from "./Versions";
 import { VOCAB, display, type VocabList } from "@/lib/vocab";
 
-type Counts = { portal_kind_conflict?: number; link_versions?: number; match_subject?: number; stage_unknown?: number; status_unknown?: number; low_confidence_executed?: number; no_kind?: number; open_total?: number; reviewed_today?: number; reviewed_total?: number };
+type Counts = { content_disagrees?: number; portal_kind_conflict?: number; link_versions?: number; match_subject?: number; stage_unknown?: number; status_unknown?: number; low_confidence_executed?: number; no_kind?: number; open_total?: number; reviewed_today?: number; reviewed_total?: number };
 export type Resp = { counts: Counts; page: number; pageSize?: number; matched?: number; nextPage: number | null; pageRows: number; rows: Row[]; notShown: NotShown; canWrite: boolean };
 
 // lane order as shown (R-022: "Status unknown" right after signing stage unknown)
-const REASON: Record<string, string> = { stage_unknown: "Stage unknown", status_unknown: "Status unknown", low_confidence_executed: "Fully executed (low confidence)", no_kind: "No kind", match_subject: "Match subject" };
+const REASON: Record<string, string> = { stage_unknown: "Stage unknown", status_unknown: "Status unknown", low_confidence_executed: "Fully executed (low confidence)", no_kind: "No kind", match_subject: "Match subject", content_disagrees: "Content disagrees" };
+// CAT-WO-06: why a content candidate is in Match subject (codes from the reader; never page text)
+const SUBJECT_REASON: Record<string, string> = {
+  NO_ROSTER_MATCH: "no roster partner found on the page", NOT_IN_FUND: "the name belongs to a partner of another fund",
+  MULTIPLE: "several roster partners on the page", CONFLICT_PERSON: "the page names a different partner than the Subject a person set",
+  CONFLICT_PORTAL: "the page names a different partner than the portal posting", MEDIUM: "read from the page, not certain",
+};
+const DISAGREE: Record<string, string> = { fiscal_year: "fiscal year", period: "period", entity: "entity" };
 const DOC_STATUSES = ["draft", "in_review", "final", "issued", "superseded"] as const;
 const SIGNAL: Record<string, string> = {
   sig_block: "signature block found", sig_page_image: "signature page is an image", scanned: "scanned", blank_line: "blank signature line",
@@ -58,7 +65,11 @@ function why(r: Row): string {
   if (r.stage_suggested && r.stage_suggested !== "unknown") parts.push(`scan suggests ${show("stage", r.stage_suggested)}`);
   const sig = (r.signals ?? []).map((s) => SIGNAL[s] ?? s);
   if (sig.length) parts.push(sig.join(", "));
-  else if (r.queue_reason === "match_subject") parts.push(`${r.subject_candidates?.length ?? 0} possible roster partner(s); pick one, several or none`);
+  else if (r.queue_reason === "match_subject") {
+    parts.push(`${r.subject_candidates?.length ?? 0} possible roster partner(s); pick one, several or none`);
+    if (r.subject_reasons?.length) parts.push(r.subject_reasons.map((x) => SUBJECT_REASON[x] ?? x).join("; "));
+  }
+  else if (r.queue_reason === "content_disagrees") parts.push(`page 1 shows a different ${(r.content_disagrees ?? []).map((x) => DISAGREE[x] ?? x).join(", ")}; check it and confirm or correct (nothing was overwritten)`);
   else if (r.queue_reason !== "no_kind" && r.queue_reason !== "status_unknown") parts.push("no scan signals");
   return parts.join(" · ");
 }
@@ -313,6 +324,7 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
         <Kpi cap="Status unknown" n={c.status_unknown ?? 0} exp="Not a signed document, and no Draft / Final / Issued status found." on={list.lanes.includes("status_unknown")} onClick={setList ? () => toggleLane("status_unknown") : undefined} />
         <Kpi cap="Executed, low confidence" n={c.low_confidence_executed ?? 0} exp="Marked fully executed, but the scan isn't sure." on={list.lanes.includes("low_confidence_executed")} onClick={setList ? () => toggleLane("low_confidence_executed") : undefined} />
         <Kpi cap="Match subject" n={c.match_subject ?? 0} exp="Which roster partner is this document about? (R-026)" on={list.lanes.includes("match_subject")} onClick={setList ? () => toggleLane("match_subject") : undefined} />
+        <Kpi cap="Content disagrees" n={c.content_disagrees ?? 0} exp="Page 1 shows a different fiscal year, period or entity than the catalog. Nothing was overwritten: check it." on={list.lanes.includes("content_disagrees")} onClick={setList ? () => toggleLane("content_disagrees") : undefined} />
         <Kpi cap="Link versions" n={c.link_versions ?? 0} exp="Proposed version families: accept, split or pick the current one." on={versionsLane} onClick={setList ? () => setVersionsLane((x) => !x) : undefined} />
         <Kpi cap="Portal kind conflict" n={c.portal_kind_conflict ?? 0} exp="Posted in a portal as one document type, but the catalog's kind differs. The kind is not changed: check it." onClick={() => { window.location.href = "/?portal_conflict=1"; }} />
         <Kpi cap="No kind" n={c.no_kind ?? 0} exp="The catalog couldn't tell what the document is." on={list.lanes.includes("no_kind")} onClick={setList ? () => toggleLane("no_kind") : undefined} />
