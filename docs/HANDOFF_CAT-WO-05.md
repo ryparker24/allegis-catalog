@@ -78,3 +78,19 @@
 
 ## Release log
 1. L10 **Published To** created as a DRAFT (`labels_setup_wo05.py --create-drafts --release`), Ryan-only permissions. **STOP 1: Ryan publishes in Label manager.**
+2. Ryan published L10; `labels_setup_wo05.py --read-published --release` → `src/lib/labels_schema.json` (commit 69f270a).
+3. Disabled the task "Allegis Catalog nightly" for the release window (last run 2026-11-20 22:00, OK).
+4. Restore point `pre-catwo05` = `br-gentle-darkness-bd84w7qh` (main LSN 5/ECA7D3A8), taken before the migration.
+5. On main: `008_wo05.sql`; `portals_wo05.py --seed-rules --release` (15 provisional rules); `--apply --release` (1,611 postings loaded).
+6. `nightly.py --only derive,checklists` from 69f270a: NIGHTLY OK.
+7. Dry-run reports on main (`wo05_dryrun_report_main.log`, `wo05_rules_main.log`): 0 contradictions on every rule; re-sync dry run (`nightly_20261120_2354_dry.log`): read 46,259 · would re-sync 18,192 · person-owned skipped 0 · errors 0 · peak 233 MB. **STOP 2: Ryan vetoed none;** approved every ST5 rule as measured, including ST5-FIN-K1PDF and ST5-FIN-REPORTPDF, and accepted the 6 "vN"-tagged files that come out Final.
+8. All 15 status rules ruled on main (`provisional = false`, all `active = true`). A second Claude session did this and its own release dry run (`nightly_20261121_0908_dry.log`), then ran the apply below; this session checked that no other job was running before continuing.
+9. **Re-sync APPLY** (`nightly_20261121_0932.log`, code 69f270a): read 46,259 · **re-synced 18,192** · person-owned skipped 0 · **errors 0** · Entity held 1 · modifiedTime changed on 0 of 739 sampled · 6,873 s · peak 237 MB. By field: Status 18,103 · Issued date 829 · Subject codes 472 · Published To Channel 842 / Posted date 834 / Posting ID 842 · Version role 93 · Supersedes 60 (identical to the approved dry run).
+10. Post-apply derive from 69f270a (`wo05_release_postapply_check_console.txt`): portal step changed 0 · cleared 0; posted documents 1,572 (Issued date 1,014 · back-load 558) · person Status kept 0 · kind conflicts 3. Readback: read 46,466 · errors 0 · 9 Status values newly set by a person on Drive (the person's value now wins). The run was stopped by the host for low memory during the follow-up re-sync **dry run** (read-only), before checklists; Ryan chose to release and let the 22:00 nightly do the re-sync and checklists.
+11. Merged `cat-wo-05` into main (fast-forward), pushed, Worker deployed; `app-main` moved to the release commit; nightly task re-enabled.
+
+**Final counts (main, 2026-11-21):**
+- Catalog Status (all documents): blank 105,357 · Final 18,978 · Issued 1,702 · Draft 1,441 · Superseded 993 · In review 285. Labelled documents still without a Status: 14,335 (was 31,197).
+- Portal: 1,611 postings · 1,572 posted documents · Issued date on 1,014 · Portal kind conflicts 3.
+- Checklists (2026-11-20 23:49 rebuild; refreshed by tonight's nightly): Audited FS Met 31 / on file 3 · K-1 Met 48 / on file 20 / missing 345 / no roster 15 · PCAP Met 168 / on file 8 / missing 1,878 / no roster 49 · LP-SUB, LP-SIDE, GP-COMMIT unchanged.
+- Restore points to delete after two clean nightlies: `pre-catwo05`; throwaway branch `catwo05-throwaway` (`br-dark-thunder-bdbjgkgh`).
