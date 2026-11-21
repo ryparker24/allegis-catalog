@@ -15,9 +15,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 SCHEMA_PATH = os.path.join(HERE, "..", "src", "lib", "labels_schema.json")
 TITLE = "Published To"
-DESCRIPTION = ("Where and when this document was delivered: the channel (LP portal, GP portal, Datum, Email), the first "
-               "posted date and the portal's posting IDs. Set by the catalog from the portals (read-only sources); a "
-               "person's value is never overwritten. CAT-WO-05 R-030.")
+DESCRIPTION = ("Where and when this document was delivered: channel, first posted date and the portal's posting IDs. "
+               "Set by the catalog; a person's value is never overwritten. CAT-WO-05 R-030.")
 CHANNELS = {"lp_portal": "LP portal", "gp_portal": "GP portal", "datum": "Datum", "email": "Email"}
 FIELDS = {"channel": "Channel", "posted_date": "Posted date", "posting_id": "Posting ID"}
 
