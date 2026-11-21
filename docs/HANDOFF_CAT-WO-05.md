@@ -94,3 +94,5 @@
 - Portal: 1,611 postings · 1,572 posted documents · Issued date on 1,014 · Portal kind conflicts 3.
 - Checklists (2026-11-20 23:49 rebuild; refreshed by tonight's nightly): Audited FS Met 31 / on file 3 · K-1 Met 48 / on file 20 / missing 345 / no roster 15 · PCAP Met 168 / on file 8 / missing 1,878 / no roster 49 · LP-SUB, LP-SIDE, GP-COMMIT unchanged.
 - Restore points to delete after two clean nightlies: `pre-catwo05`; throwaway branch `catwo05-throwaway` (`br-dark-thunder-bdbjgkgh`).
+
+**CATWO05 RELEASED b6d86a9752e72129056f390a3f882ec374abb10c** (2026-11-21): main + `app-main` on this commit, Worker version `59aa5b9f-f40e-4cc7-8895-241745dab513`, nightly task re-enabled (next run 2026-11-21 22:00 from `app-main`). This line was added in a docs-only commit after the release commit.
