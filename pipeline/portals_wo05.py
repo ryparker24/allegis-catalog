@@ -369,6 +369,8 @@ def apply_issued(conn, apply=True, log=print):
         chans, first, pids, issued = issued_values(ps)
         rule = "PORTAL-" + "+".join(sorted({p["portal"].upper() for p in ps}))
         new_idate = issued                                   # only this step writes issued_date_auto (None for a back-load)
+        if st_person and st_person != "issued":
+            new_idate = None                                 # a person's Draft / Final never shows a machine Issued date
         row = ("issued", rule, new_idate, chans, first, pids)
         if (st, srule, idate, ch_old or [], pd_old, ids_old or []) != ("issued", rule, new_idate, chans, first, pids):
             upd.append(row + (d,))

@@ -130,6 +130,9 @@ def main():
                 try:
                     pw.export_from_portals(log=print)        # only with Ryan's read-only logins; else the newest exports
                     pw.load(c, apply=True, log=print)
+                except (Exception, SystemExit) as e:          # coder review: a bad / missing export must not skip derive,
+                    print(f"   portals NOT refreshed ({type(e).__name__}); last loaded postings kept")   # resync, checklists
+                    timings["portals_failed"] = 1
                 finally:
                     c.close()
             elif step == "derive":

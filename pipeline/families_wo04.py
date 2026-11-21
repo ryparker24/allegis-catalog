@@ -224,7 +224,8 @@ def write(conn, live, fams, rows, commit=True):
         # 3. Superseded status (machine) on members that are no longer current; cleared when they are again
         cur.execute("""UPDATE cat.document d SET status_auto='superseded', status_rule='VF-superseded', updated_at=now()
                        FROM wo04_m w WHERE w.document_id = d.document_id AND w.status_superseded
-                         AND d.status_confirmed IS NULL AND d.status_auto IS DISTINCT FROM 'superseded'""")
+                         AND d.status_confirmed IS NULL AND d.status_auto IS DISTINCT FROM 'superseded'
+                         AND coalesce(d.status_rule, '') NOT LIKE 'PORTAL-%%'""")   # CAT-WO-05: posted = Issued wins
         # a family member whose machine status was made superseded and is current again: status back to the rule's
         # (apply_derive_wo02 recomputes status_auto every derive, before this step, so only rows THIS step set remain)
         cur.execute("""UPDATE cat.doc_family f SET n_members = n.c, method = CASE WHEN f.confidence = 'person' THEN 'person' ELSE f.method END

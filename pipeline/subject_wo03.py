@@ -278,7 +278,10 @@ def run(conn, apply=False, staff=None, log=print):
             rule = {"high": "SUBJ-HIGH", "low": "SUBJ-LOW"}.get(outcome)
         if person_codes is None and did in portal:
             # a posting is the strongest evidence: the posted-to partner(s) are high; a high name/folder match is kept
-            pm = [(p, e, "portal") for p, e, _h in sorted(portal[did], key=lambda x: x[0])]
+            best = {}
+            for p, e, _h in sorted(portal[did], key=lambda x: (x[0], x[1] is None, x[1] or "")):
+                best.setdefault(p, e)                         # one row per code (an entity-bearing match first)
+            pm = [(p, e, "portal") for p, e in sorted(best.items())]
             have = {p for p, _, _ in pm}
             matches = pm + ([m for m in matches if m[0] not in have] if outcome == "high" else [])
             outcome, rule = "high", ("SUBJ-PORTAL" if rule != "SUBJ-HIGH" else "SUBJ-PORTAL+HIGH")

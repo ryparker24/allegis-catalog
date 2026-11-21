@@ -93,6 +93,12 @@ pc = cur.execute("""SELECT count(*) FROM cat.document d JOIN cat.doc_posting dp 
                     WHERE d.subject_codes_confirmed IS NOT NULL AND d.subject_rule LIKE 'SUBJ-PORTAL%%'""").fetchone()[0]
 check("G-S1 a person's Subject codes win: no person-confirmed document carries a portal subject rule", pc == 0, str(pc))
 
+dup = cur.execute("""SELECT count(*) FROM cat.document WHERE subject_codes_auto IS NOT NULL
+                     AND cardinality(subject_codes_auto) <> (SELECT count(DISTINCT x) FROM unnest(subject_codes_auto) x)""").fetchone()[0]
+check("G-S2 (coder review) no document carries the same Subject code twice (a duplicate would freeze the label as person-set)", dup == 0, str(dup))
+fl = cur.execute("SELECT count(*) FROM cat.document WHERE status_rule = 'VF-superseded' AND published_ids_auto IS NOT NULL").fetchone()[0]
+check("G-P6 (coder review) a posted document is never made Superseded by the family step (no nightly flip)", fl == 0, str(fl))
+
 # G-M1 memory: the apply on the whole branch stays small
 import tracemalloc
 tracemalloc.start()
