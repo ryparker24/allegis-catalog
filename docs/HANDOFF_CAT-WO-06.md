@@ -2,7 +2,7 @@
 
 *2026-11-21. Codes, IDs and counts only: no LP, GP member, employee or file names, no page text, no TINs. Order: `orders/CAT-WO-06_First_Page_Reading.md`. Rulings R-033 – R-038 proposed with defaults; Ryan can veto any at the dry-run stop.*
 
-**Status (kept current):** built on git branch `cat-wo-06` from main `31880e0` (= `b6d86a9` + the docs-only RELEASED line), one squashed commit (an earlier commit carried an invented TIN-shaped test value; the branch was never pushed). Tested on the throwaway Neon branch `catwo06-throwaway` (`br-misty-paper-bd23sm4c`, endpoint `ep-spring-unit-bds6x67g`, from main at 2026-11-21 20:54, created by Ryan / the coordinator on Ryan's approval). Migration 009 ran twice (idempotent), 19 CNT rules seeded. **Gate passed** (2026-11-21 22:00 nightly OK, portals exported directly, no banner). **Released to main up to STOP 2 (dry run); waiting for Ryan's apply.** Nightly disabled. (nothing has touched main, Drive labels or the portals).
+**Status (kept current):** built on git branch `cat-wo-06` from main `31880e0` (= `b6d86a9` + the docs-only RELEASED line), one squashed commit (an earlier commit carried an invented TIN-shaped test value; the branch was never pushed). Tested on the throwaway Neon branch `catwo06-throwaway` (`br-misty-paper-bd23sm4c`, endpoint `ep-spring-unit-bds6x67g`, from main at 2026-11-21 20:54, created by Ryan / the coordinator on Ryan's approval). Migration 009 ran twice (idempotent), 19 CNT rules seeded. **Gate passed** (2026-11-21 22:00 nightly OK, portals exported directly, no banner). **RELEASED 2026-11-22** (see the end of this file). (nothing has touched main, Drive labels or the portals).
 
 ## What was built (branch `cat-wo-06`)
 | Piece | Where | Notes |
@@ -118,4 +118,17 @@ Projected from item 0: ~7.6 min a night (≈196 documents), at most ~19 min at t
 8. `nightly.py --only derive,checklists` (code 126b9c6): NIGHTLY OK; `nightly.py --only resync` (dry run): would re-sync 590, errors 0.
 9. **STOP 2.** Nothing written to Drive.
 - Stale `ops.nightly_run` row `nightly_20261121_1151_dry` (status running) is listed, not changed: the status CHECK has no "aborted", so marking it would need a constraint change.
-- If no apply by 21:30 on 2026-11-22: re-enable the task from `app-main` at `b6d86a9` (that code runs safely on the migrated schema: the new columns are nullable, the views only gained columns).
+- If no apply by 21:30 on 2026-11-22: re-enable the task from `app-main` at `b6d86a9` (that code runs safely on the migrated schema: the new columns are nullable, the views only gained columns). *(Not needed: applied 2026-11-22.)*
+10. **Rulings (Ryan, 2026-11-22):** R-033 – R-038 approved, none vetoed. All 19 CNT rules ruled on main (`provisional = false`, all active); CNT-PCAP-TOP stays lane-only (medium) as designed.
+11. **Ryan: "apply".** Re-sync APPLY (`nightly_20261122_0943.log`, code 9ec3c6c): read 46,259 · **re-synced 590** (Subject code(s) 22 · Handling Contains 578) · person-owned skipped 1 · **errors 0** · Entity held 1 · **modifiedTime changed on 0 of 35 sampled** · 1,810 s · peak 236 MB.
+12. Live spot checks (codes only, previews hidden): Subject code(s) on 10/10 sampled files match the catalog; Handling Contains flags on 15/15 sampled files.
+13. `C:\DriveCatalog\drive_crawl.py` gained the `pages` mode (`scripts/release_wo06_crawl_mode.py`; backup `drive_crawl.py.pre-catwo06.bak`).
+14. main pushed (`31880e0..9ec3c6c`), vitest 142/142, tsc clean; **Worker deployed, version `60945591-2874-4e36-bbaa-cff42e9d01ae`**.
+15. `app-main` moved to `9ec3c6c`; task "Allegis Catalog nightly" **re-enabled** (next run 2026-11-22 22:00). The nightly now reads up to 500 new / backlog documents a night inside derive (~13.9k backlog ≈ 4 weeks).
+16. Local backup branch of the pre-squash commits deleted.
+
+**Final counts (main, 2026-11-22, after apply):** K1-SET Met 48 / On file 20 / Missing 345 / No roster 15 · PCAP-Q Met 176 / On file 2 / Missing 1,876 / No roster 49 · LP-SUB Met 70 / On file 62 / Missing 146 / No roster 7 · LP-SIDE Met 5 / On file 13 / None found 260 / No roster 7 · AUDITED-FS Met 31 / On file 3. Pages read on main: 949 (FY2025+ candidates). Lanes: Match subject 1,311 files (164 from content) · Content disagrees 3.
+- Restore points to delete after two clean nightlies: `pre-catwo06` (`br-tiny-recipe-bd90no1v`); throwaway `catwo06-throwaway` (`br-misty-paper-bd23sm4c`).
+- Follow-ups: the CIP-II 2025 investor K-1s / PCAPs are not in the catalog (594 Missing rows); `ops.nightly_run` row `nightly_20261121_1151_dry` still shows running (status CHECK has no "aborted").
+
+**CATWO06 RELEASED 9ec3c6c48bd3067d513a2875fc510995255edbac** (2026-11-22): main + `app-main` on this commit, Worker version `60945591-2874-4e36-bbaa-cff42e9d01ae`, nightly task re-enabled (next run 2026-11-22 22:00 from `app-main`). This line was added in a docs-only commit after the release commit.
