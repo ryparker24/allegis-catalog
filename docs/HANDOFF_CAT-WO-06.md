@@ -2,7 +2,7 @@
 
 *2026-11-21. Codes, IDs and counts only: no LP, GP member, employee or file names, no page text, no TINs. Order: `orders/CAT-WO-06_First_Page_Reading.md`. Rulings R-033 – R-038 proposed with defaults; Ryan can veto any at the dry-run stop.*
 
-**Status (kept current):** built on git branch `cat-wo-06` from main `31880e0` (= `b6d86a9` + the docs-only RELEASED line), one squashed commit (an earlier commit carried an invented TIN-shaped test value; the branch was never pushed). Tested on the throwaway Neon branch `catwo06-throwaway` (`br-misty-paper-bd23sm4c`, endpoint `ep-spring-unit-bds6x67g`, from main at 2026-11-21 20:54, created by Ryan / the coordinator on Ryan's approval). Migration 009 ran twice (idempotent), 19 CNT rules seeded. **Ready for main, waiting on the 2026-11-21 22:00 nightly** (nothing has touched main, Drive labels or the portals).
+**Status (kept current):** built on git branch `cat-wo-06` from main `31880e0` (= `b6d86a9` + the docs-only RELEASED line), one squashed commit (an earlier commit carried an invented TIN-shaped test value; the branch was never pushed). Tested on the throwaway Neon branch `catwo06-throwaway` (`br-misty-paper-bd23sm4c`, endpoint `ep-spring-unit-bds6x67g`, from main at 2026-11-21 20:54, created by Ryan / the coordinator on Ryan's approval). Migration 009 ran twice (idempotent), 19 CNT rules seeded. **Gate passed** (2026-11-21 22:00 nightly OK, portals exported directly, no banner); **main steps wait for the coordinator's decision on the lift numbers** (nothing has touched main, Drive labels or the portals).
 
 ## What was built (branch `cat-wo-06`)
 | Piece | Where | Notes |
@@ -38,6 +38,17 @@
 - **Packages / bundles (sample):** K-1 bundles 6 of 200 (3%), pages median 14 / max 51, statements found ÷ roster size median 4.0; PCAP packages 2 of 200 (1%), 2 pages each. (Earlier cnt-1 pass: bundles of 55–96 pages.)
 - **Checklists, effect of the sample alone** (K1-SET, PCAP-Q from FY2025; LP-SUB): K1-SET Met 48 → 48 · PCAP-Q 168 → 168 · LP-SUB Met 66 → 69, on file 56 → 62, missing 156 → 147. Projected at full scope: K1-SET ~0, PCAP-Q ~0, LP-SUB ~+4 Met (straight scaling of the sample; the dry run on main after the full backfill gives the real numbers). **Finding:** the sampled K-1 / PCAP matches mostly hit documents that are older than FY2025 or already Met through the portal (R-031), so the checklist lift the order hoped for is not visible in the sample.
 - **Timing:** mean 2.33 s per document (median 0.79 s, max 60.6 s, OCR-heavy subscriptions slowest) → **backfill of 14,877 documents ≈ 9.6 h**; the nightly sees ~196 new in-scope documents a night ≈ **7.6 min** (cap 500 → at most ~19 min). Memory peak 508 MB (a 50+ page bundle), under the 489 MB-era nightly peak + headroom on a 31.5 GB machine.
+
+## Targeted measure · FY2025-onward candidates (throwaway; `scripts/measure_wo06_targeted.py`; log `logs/wo06_targeted_20261121_1712.log`)
+- Candidates: 1,066 (K-1 / PCAP with FY >= 2025 or blank FY in a roster entity, plus all subscriptions and side letters); readable 949 (K-1 304, PCAP 277, subscription 285, side letter 83). **Read in 66 min (4.15 s each)**: ok 779, no anchor 166, too large 4. Content check: FY filled 1; disagreements 22 (entity 19, FY 3).
+- **Checklists before -> after, as designed** (K1-SET / PCAP-Q from FY2025): K1-SET Met 48 -> 48 · PCAP-Q Met 168 -> 176 (+8), On file 8 -> 2, Missing 1,878 -> 1,876 · LP-SUB Met 66 -> 70 (+4), On file 56 -> 62, Missing 156 -> 146. No roster unchanged (15 / 49 / 7).
+- **As if CNT-PCAP-TOP were promoted** (96 medium rows simulated as high, then reverted): identical numbers (the promoted rows land on documents outside the FY2025+ rows or already Met).
+- **Missing rows from FY2025 (2,221), by cause:**
+  - K1-SET (345): (a) no K-1 for that entity-period in the catalog 181 (top FUNDAM 2025 25, MTV-V (MTEF) 2025 20, MTV-IV (GP) 2025 19, MTV-III (PF) 2025 14, CIP-II (GP) / MTV-IV (Annex) (GP) / X (GP) 2025 13 each) · (b2) a K-1 exists with its anchor read but no roster name for that partner 37 (MTV-IV (Annex) 15, ACCSO 8, MTV-V (A) 8) · (b3) the entity-period's K-1s carry a name of a partner of another fund 127 (CIP-II 2025 118). (b1) no anchor: 0.
+  - PCAP-Q (1,876): (a) no PCAP for that entity-period 1,713 (CIP-II 2025 357 and 2026 357, FUNDAM 2025 100 / 2026 75, MTV-V (MTEF) 2025 60, ACCSO 56, MTV-III (PF) 56, IVY 52) · (b2) 119 (CIP-II 2025) · (b3) 44 (MTV-IV (Annex), MTV-V (B), MTV-IV (A) 2025-26).
+  - (c) matched but not final / issued (On file): K1-SET partner unconfirmed 14, unknown 6; PCAP-Q partner unconfirmed 2.
+  - The (b) split is per entity-period (any of its documents with a NOT_IN_FUND name puts the period in b3), so b3 is an upper bound. **CIP-II 2025 (118 K-1 rows, 119 PCAP rows) is one pattern worth a look:** its documents name partners that the Datum roster carries under another entity code.
+- **Conclusion:** most Missing rows are documents the catalog does not have (K-1 52%, PCAP 91%), not unmatched documents. First-page reading adds +8 PCAP-Q and +4 LP-SUB Met in the FY2025+ scope; K1-SET none.
 
 ## Per-rule counts and precision
 Sample (item 0): above. Full counts per rule: *at the dry run on main (full backfill).*
