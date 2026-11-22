@@ -2,7 +2,7 @@
 
 *2026-11-21. Codes, IDs and counts only: no LP, GP member, employee or file names, no page text, no TINs. Order: `orders/CAT-WO-06_First_Page_Reading.md`. Rulings R-033 – R-038 proposed with defaults; Ryan can veto any at the dry-run stop.*
 
-**Status (kept current):** built on git branch `cat-wo-06` from main `31880e0` (= `b6d86a9` + the docs-only RELEASED line), one squashed commit (an earlier commit carried an invented TIN-shaped test value; the branch was never pushed). Tested on the throwaway Neon branch `catwo06-throwaway` (`br-misty-paper-bd23sm4c`, endpoint `ep-spring-unit-bds6x67g`, from main at 2026-11-21 20:54, created by Ryan / the coordinator on Ryan's approval). Migration 009 ran twice (idempotent), 19 CNT rules seeded. **Gate passed** (2026-11-21 22:00 nightly OK, portals exported directly, no banner); **main steps wait for the coordinator's decision on the lift numbers** (nothing has touched main, Drive labels or the portals).
+**Status (kept current):** built on git branch `cat-wo-06` from main `31880e0` (= `b6d86a9` + the docs-only RELEASED line), one squashed commit (an earlier commit carried an invented TIN-shaped test value; the branch was never pushed). Tested on the throwaway Neon branch `catwo06-throwaway` (`br-misty-paper-bd23sm4c`, endpoint `ep-spring-unit-bds6x67g`, from main at 2026-11-21 20:54, created by Ryan / the coordinator on Ryan's approval). Migration 009 ran twice (idempotent), 19 CNT rules seeded. **Gate passed** (2026-11-21 22:00 nightly OK, portals exported directly, no banner). **Released to main up to STOP 2 (dry run); waiting for Ryan's apply.** Nightly disabled. (nothing has touched main, Drive labels or the portals).
 
 ## What was built (branch `cat-wo-06`)
 | Piece | Where | Notes |
@@ -91,5 +91,31 @@ Projected from item 0: ~7.6 min a night (≈196 documents), at most ~19 min at t
 17. **The extractor is versioned** (`cnt-3` now); a change to the extraction code bumps it and re-reads everything once.
 18. **The DB session is kept alive** through long reads (a ping a minute) and a dropped session is reopened for the batch write (the first item-0 run lost its session to a compute restart).
 
+## CIP-II diagnosis (throwaway, read-only)
+- Datum carries a CIP-II fund roster of **119 partners** (plus CIP-II (GP) 13, CIP-I 6, CIP-I (GP) 13); no CIP-II partner sits under another entity code.
+- CIP-II FY2025 K-1 / PCAP documents in the catalog: **32** (K-1 30, PCAP 2); read ok 28, no anchor 1, too large 2. Page 1 entity: CIP-II 2, none 27. Document entities: CIP-II 30, also CIP2A 12; issuing entity set on 4.
+- Their partner blocks: **no roster name on 28** (NO_ROSTER_MATCH); only **2 names of another fund's partners** (2 partner codes, each on GP / fund rosters such as ASOF (GP), CIP-I (GP), CIP-II (GP), MTV-* (GP), IVY, TM). The "b3 = 118" in the targeted measure came from the per-entity-period rule (one document with such a name puts every row of the period in b3).
+- **Reading: these are not CIP-II's investor K-1s** (most look like K-1s received by the fund or by its admin entity, whose partner name is a fund-name variant not in the entity aliases). **A mapping correction would move ~0 K1-SET / PCAP-Q rows**; the CIP-II 2025 investor K-1s / PCAPs (118 + 476 Missing rows) are not in the catalog.
+
+## Dry run on main (STOP 2) · `logs/wo06_dryrun_report_main.log`, `nightly_20261122_0029_dry.log`, `nightly_20261122_0037_dry.log`
+- **Read on main:** the 949 FY2025+ candidates in 50 min: ok 779 · no anchor 166 · too large 4 · OCR on 131 (subscriptions / side letters). Backlog ~13.9k left to the nightly cap.
+- **By CNT rule (rows):** CNT-PCAP-PARTNER high 114 · medium 4 · NOT_IN_FUND 15 · MULTIPLE 8 · CNT-PCAP-TOP medium 96 · NOT_IN_FUND 48 · MULTIPLE 10 · CNT-SUB-LBL high 18 · CNT-SUB-TOP medium 31 · NOT_IN_FUND 29 · CNT-SL-ADDR medium 26 · CNT-K1-PII high 2 · medium 5 · NOT_IN_FUND 13 · NO_ROSTER_MATCH 266 (K-1 page read, partner not on the roster) · received by an entity 1.
+- **Precision vs references taken before the read:** CNT-PCAP-PARTNER high 104/104 · CNT-SUB-LBL high 4/4 · CNT-K1-PII high 2/2 → **110/110 = 100%**. Medium: CNT-PCAP-TOP 96/96, CNT-SL-ADDR 6/6, CNT-K1-PII 5/5, CNT-PCAP-PARTNER 2/2, CNT-SUB-TOP 18/20 = 90%. No high rule under 97%.
+- **Subject codes to write:** re-sync dry run → **22 files** (Subject code(s)); documents SUBJ-CONTENT 22 / SUBJ-CONTENT-LOW 16 (labelled); content-high documents 134 (all single statements); code lists too long for the label: 0.
+- **Handling flags to write:** **578 files** (Contains + Tax ID on 293 labelled documents, + LP PII on 248; tier unchanged).
+- **Re-sync dry run:** read 46,259 · would re-sync 590 files (subject_codes 22, Handling 578) · person-owned skipped 1 · errors 0 · peak 220 MB.
+- **Lanes:** Match subject 1,311 files (164 from content, 1,147 as before); content lane documents by reason NO_ROSTER_MATCH 138 · NOT_IN_FUND 54 · MEDIUM 34 · MULTIPLE 6. Content disagrees: 3 files (16 documents disagree on entity; the rest are not labelled).
+- **Checklists before -> after (all years):** K1-SET 48 / 20 / 345 / 15 unchanged · **PCAP-Q Met 168 -> 176**, On file 8 -> 2, Missing 1,878 -> 1,876 · **LP-SUB Met 66 -> 70**, On file 56 -> 62, Missing 156 -> 146 · LP-SIDE On file 9 -> 13, None found 264 -> 260 · GP-COMMIT, AUDITED-FS unchanged. Rows showing p. N: 203.
+
 ## Release log
-*Not started: waits for the 22:00 nightly and the coordinator's go.*
+1. 2026-11-21 22:00 nightly OK (gate; clean nightly 1 of 2 for CAT-WO-05).
+2. Task "Allegis Catalog nightly" **disabled** for the release window.
+3. Restore point **`pre-catwo06`** = `br-tiny-recipe-bd90no1v` (main LSN 7/1A805BF0), no compute, taken before the migration.
+4. `cat-wo-06` fast-forwarded into main **locally** (not pushed, Worker not deployed: that follows Ryan's apply).
+5. On main (owner): `009_wo06.sql`; `pages_wo06 --seed-rules --release` (19 provisional rules).
+6. `nightly.py --only derive,checklists` from main with the pages step off: NIGHTLY OK, checklists unchanged (baseline).
+7. FY2025+ candidates read on main (`release_wo06_targeted_read.py --release --apply`).
+8. `nightly.py --only derive,checklists` (code 126b9c6): NIGHTLY OK; `nightly.py --only resync` (dry run): would re-sync 590, errors 0.
+9. **STOP 2.** Nothing written to Drive.
+- Stale `ops.nightly_run` row `nightly_20261121_1151_dry` (status running) is listed, not changed: the status CHECK has no "aborted", so marking it would need a constraint change.
+- If no apply by 21:30 on 2026-11-22: re-enable the task from `app-main` at `b6d86a9` (that code runs safely on the migrated schema: the new columns are nullable, the views only gained columns).
