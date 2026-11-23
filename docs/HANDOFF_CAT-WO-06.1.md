@@ -43,4 +43,19 @@
 ## Dry run (main)
 - **By rule:** ENT-GP-P adds the GP entity on the GP partner-package documents (Entity written on 209 files); the version families of 24 files re-form because their entity set changed; 66 files get Subject codes (GP members matched under their GP's roster, plus content).
 - **Checklists before -> after (main):** **K1-SET Met 48 -> 123**, Missing 345 -> 269, On file 20 -> 21 (ASOF (GP) +11, CIP-II (GP) +12, MTV-III (PF) (GP) +11, MTV-IV (Annex) (GP) +12, MTV-IV (GP) +18, MTV-V (GP) +12; MTV-IV (Annex) fund -1, see "Throwaway results") · PCAP-Q 176 -> 176 · LP-SUB 70 -> 70.
-- **PCAP-Q for the CIP-II 2025 Q4 PCAPs moves only once they are labelled.** Then: Status Final (ST5-FIN-REPORTPDF) and about **99 Met of 119** (99 roster partners high), ~16 On file (partner unconfirmed), ~4 Missing. Labelling new files is outside this order (the bulk labeller); proposed as a separate step for Ryan.
+- **PCAP-Q for the CIP-II 2025 Q4 PCAPs moves only once they are labelled.** Then: Status Final (ST5-FIN-REPORTPDF) and about **99 Met of 119** (99 roster partners high), ~16 On file (partner unconfirmed), ~4 Missing. Folded into this order on Ryan's decision (below).
+
+
+## Labelling new files in LIMITED - Finance (Ryan, decision card: "Label all 614 now and nightly"; R-019)
+- **Code:** `pipeline/label_new_wo061.py` (CLI + nightly step `label`, after derive, before read-back / re-sync). The full label set from the catalog (Allegis Document incl. Catalog ID, Execution, Parties, Version, Published To, Handling tier + Contains, Catalog Review = Needs review), batches of 25, live labels read right before writing (a file that already carries any catalog label is skipped and left to the read-back), Secret / noise / shortcut / trashed never, dates as RFC 3339 strings, labelled files join `app.labelled_file` at once (idempotent). After labelling, the nightly re-runs the WO-02 derive part so the new documents get their Status the same night.
+- **Tests:** `test_wo061` 11/11.
+- **Dry run on main** (`scripts/dryrun_wo061_label.py`; live labels read, nothing written; the checklist effect simulated in one transaction and rolled back — `app.labelled_file` still 46,259 afterwards):
+  - **614 files to label** (all 614 carry no label live; 0 skipped, 0 errors). By kind: capital statement 308 · no kind 138 · K-1 117 · financial statements 16 · quarterly report 12 · workpaper 10 · legal agreement 5 · correspondence 4 · other 4. By entity: CIP-II 237 · none 236 · MTV-IV (A) 42 · MTV-V (A) 28 · MTV-V (MTEF) 21 · MTV-III 16 · MTV-IV (Annex) 15 · ACCSO 13 · MTV-V (B) 12 · others 24.
+  - Fields written: workstream 614 · fiscal year 547 · kind 476 · period 407 · entity 378 · Subject code(s) 287 · Status / Issued date / Published To 116 · stage 7; plus Handling tier, Contains where flagged, Catalog ID and Catalog Review = Needs review on every file.
+  - **Status after derive** (documents of the 614): Final 356 · Issued 116 · blank 113 · In review 24 · Draft 2 · Superseded 1.
+  - **Checklists before -> after** (on top of the GP folder rule): **K1-SET Met 123 -> 200**, On file 21 -> 46, Missing 269 -> 167 · **PCAP-Q Met 176 -> 341**, On file 2 -> 31, Missing 1,876 -> 1,682 · LP-SUB, LP-SIDE, GP-COMMIT, AUDITED-FS unchanged. **PCAP-Q CIP-II 2025 Q4: Missing 119 -> Met 98 / On file 17 / Missing 4.**
+  - Review queue: 229 of the newly labelled files land in a lane (no kind, Match subject, Status unknown ...).
+- **Combined from the original baseline (main before 06.1):** K1-SET Met 48 -> 200 · PCAP-Q Met 176 -> 341.
+
+## Apply plan (one "apply" for 06.1 + the labelling)
+1. `label_new_wo061 --release --apply` (614 files) · 2. `nightly.py --only derive,readback,resync,checklists --apply` (pages off): derive with the labels in place, read-back (first sight of the 614), re-sync (the 263 06.1 writes + Status etc. on the 614), checklists · 3. spot checks · 4. push main, deploy the Worker, `app-main` to the release commit, `drive_crawl.py` unchanged · 5. re-enable the nightly (now with the `label` step) · 6. CATWO061 RELEASED.
