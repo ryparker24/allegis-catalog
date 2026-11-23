@@ -6,7 +6,9 @@ when 22:00 was missed). Runs from C:\DriveCatalog\app-main (a checkout of main),
   1b. portals     CAT-WO-05: the newest dated portal exports (C:\DriveCatalog\portal_exports) -> ref.portal_posting (codes only).
                   Only when Ryan's read-only logins exist (lp_portal_url.txt / gp_portal_url.txt) are the portals contacted,
                   with three SELECTs in a READ ONLY session, refused if the login could write. Partners map to last night's roster.
-  2. derive       rules + apply_derive_wo02 (kinds, audited FS, parties, status, locations)
+  2. derive       rules + apply_derive_wo02 (kinds, audited FS, parties, status, locations; CAT-WO-06 pages sub-step)
+  2b. label       CAT-WO-06.1: label new readable files in LIMITED - Finance (full label set; --apply writes, else dry run),
+                  then re-run the WO-02 derive part so they get their Status the same night
   3. readback     labels -> catalog (a person's edits become person-set values)
   4. resync       catalog -> labels on labelled files, never over a person's value        (--apply writes; else dry run)
   5. checklists   roster -> Subject -> requirements
@@ -23,7 +25,7 @@ import argparse, datetime, glob, io, json, os, socket, subprocess, sys, time, tr
 APP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))      # the checkout this script runs from
 HOME = os.environ.get("DRIVECATALOG_DIR", r"C:\DriveCatalog")
 LOGS = os.path.join(HOME, "logs")
-STEPS = ["crawl", "portals", "derive", "readback", "resync", "checklists"]
+STEPS = ["crawl", "portals", "derive", "label", "readback", "resync", "checklists"]
 
 
 def mem_mb():
@@ -137,6 +139,9 @@ def main():
                     c.close()
             elif step == "derive":
                 c = dc.db(); dc.derive(c); c.close()
+            elif step == "label":                         # CAT-WO-06.1: new files in the labelled scope (R-019)
+                import label_new_wo061 as ln
+                ln.nightly_step(dc.db, apply=a.apply, log=print)
             elif step == "readback":
                 dc.wo02_readback(dc.db, drive())
             elif step == "resync":
