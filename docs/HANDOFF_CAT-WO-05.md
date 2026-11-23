@@ -96,3 +96,5 @@
 - Restore points to delete after two clean nightlies: `pre-catwo05`; throwaway branch `catwo05-throwaway` (`br-dark-thunder-bdbjgkgh`).
 
 **CATWO05 RELEASED b6d86a9752e72129056f390a3f882ec374abb10c** (2026-11-21): main + `app-main` on this commit, Worker version `59aa5b9f-f40e-4cc7-8895-241745dab513`, nightly task re-enabled (next run 2026-11-21 22:00 from `app-main`). This line was added in a docs-only commit after the release commit.
+
+**Clean-up (2026-11-23):** two clean nightlies after release (2026-11-21 22:00 and 2026-11-22 22:00, both NIGHTLY OK). Neon branches deleted at 2026-11-23 07:18 UTC by the coordinator session on Ryan's approval: throwaway `catwo05-throwaway` (`br-dark-thunder-bdbjgkgh`) and restore point `pre-catwo05` (`br-gentle-darkness-bd84w7qh`). Confirmed gone from the project's branch list.
