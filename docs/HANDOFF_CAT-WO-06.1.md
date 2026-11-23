@@ -30,4 +30,17 @@
 4. The rule applies to every folder with such a name (other years' partner-package folders too: 5–8 folders per name).
 
 ## Release log
-*Waiting for the 2026-11-22 22:00 nightly (and its pickup of the 119 new CIP-II PCAPs) and the coordinator's go.*
+1. 2026-11-22 22:00 nightly (code 9ec3c6c) **OK**: crawl new 409 / changed 2,398 / removed 19 · portals exported directly (451 / 1,160 / 51) · **pages sub-step: read 500 in 560 s** (ok 189, no anchor 255, encrypted 56; backlog 13,771) · derive ok · read-back ok · re-sync 716 written, 0 errors, modifiedTime 0 of 43 · checklists unchanged (K1-SET 48 · PCAP-Q 176 · LP-SUB 70) · exit 0 · no banner. **Clean nightly 2 of 2 for CAT-WO-05; 1 of 2 for CAT-WO-06.**
+2. The crawl picked up the **119 CIP-II 2025 Q4 PCAPs**: 119 documents (all primary), kind capital_statement, entity CIP-II, FY2025 Q4, partner high from the file name on 79, low on 26. **Not labelled** (the nightly labels no new files: 614 readable files in LIMITED - Finance carry no Allegis Document label, 408 of them new on 2026-11-22), so their Status stays blank (status rules run on labelled documents) and Find / Checklists don't see them.
+3. Task disabled. Restore point **`pre-catwo061`** = `br-curly-forest-bdgvcx3y` (main LSN 8/408B1BC0).
+4. `cat-wo-06-1` fast-forwarded into main **locally** (e94c442; not pushed).
+5. On main (owner): `010_wo061.sql` (7 GP code aliases, 2 folder aliases, rule ENT-GP-P provisional).
+6. `nightly.py --only derive,checklists` (pages off): NIGHTLY OK.
+7. The 119 CIP-II PCAPs read on main: 122 s, ok 119; candidates high 91 · medium 3 · MULTIPLE 48 rows · NOT_IN_FUND 2 · no roster name 5. With the file-name matches: **102 documents high (99 CIP-II roster partners: content 91, name 11)**, 16 low only, 1 none.
+8. `nightly.py --only derive,checklists`: NIGHTLY OK. Re-sync dry run: read 46,259 · **would re-sync 263 files** (Entity 209 · Subject code(s) 66 · Version family / role 24 · Supersedes 8 · Status 10) · person-owned skipped 1 · errors 0.
+9. **STOP for Ryan's apply.**
+
+## Dry run (main)
+- **By rule:** ENT-GP-P adds the GP entity on the GP partner-package documents (Entity written on 209 files); the version families of 24 files re-form because their entity set changed; 66 files get Subject codes (GP members matched under their GP's roster, plus content).
+- **Checklists before -> after (main):** **K1-SET Met 48 -> 123**, Missing 345 -> 269, On file 20 -> 21 (ASOF (GP) +11, CIP-II (GP) +12, MTV-III (PF) (GP) +11, MTV-IV (Annex) (GP) +12, MTV-IV (GP) +18, MTV-V (GP) +12; MTV-IV (Annex) fund -1, see "Throwaway results") · PCAP-Q 176 -> 176 · LP-SUB 70 -> 70.
+- **PCAP-Q for the CIP-II 2025 Q4 PCAPs moves only once they are labelled.** Then: Status Final (ST5-FIN-REPORTPDF) and about **99 Met of 119** (99 roster partners high), ~16 On file (partner unconfirmed), ~4 Missing. Labelling new files is outside this order (the bulk labeller); proposed as a separate step for Ryan.
