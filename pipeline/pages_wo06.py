@@ -789,20 +789,21 @@ WITH d AS (
 ), f AS (
   SELECT DISTINCT ON (fd.document_id) fd.document_id, f.file_id, f.mime_type, f.size_bytes,
          coalesce(f.md5, 'rev:' || coalesce(f.head_revision_id, f.modified_time::text)) AS version_key, f.drive_name,
+         greatest(f.modified_time, f.created_time) AS fresh,
          (fd.file_role = 'primary') AS is_primary
   FROM cat.file_document fd JOIN cat.file f ON f.file_id = fd.file_id
   WHERE fd.document_id IN (SELECT document_id FROM d) AND f.removed_run IS NULL AND f.trashed IS NOT TRUE
     AND f.is_shortcut IS NOT TRUE AND coalesce(f.handling, 'secret') <> 'secret' AND f.noise_flag IS NOT TRUE
   ORDER BY fd.document_id, (fd.file_role = 'primary') DESC, (f.mime_type = 'application/pdf') DESC, f.file_id
 )
-SELECT d.document_id, d.kind, f.file_id, f.mime_type, f.size_bytes, f.version_key, f.drive_name, f.is_primary
+SELECT d.document_id, d.kind, f.file_id, f.mime_type, f.size_bytes, f.version_key, f.drive_name, f.is_primary, f.fresh
 FROM d LEFT JOIN f USING (document_id)
 """
 
 
 def scope(cur):
     cur.execute(SCOPE_SQL, {"kinds": list(KINDS)})
-    return [dict(zip(["document_id", "kind", "file_id", "mime", "size", "version_key", "drive", "is_primary"], r)) for r in cur.fetchall()]
+    return [dict(zip(["document_id", "kind", "file_id", "mime", "size", "version_key", "drive", "is_primary", "fresh"], r)) for r in cur.fetchall()]
 
 
 def fmt_of(mime):
@@ -829,8 +830,23 @@ def to_read(cur, docs, incremental):
         if prev and prev[0] == d["version_key"] and prev[1] == EXTRACTOR_VERSION and d["document_id"] not in learn:
             continue
         out.append(dict(d, learn=d["document_id"] in learn))
-    out.sort(key=lambda d: (not d["learn"], d["document_id"]))
+    # CAT-WO-06.1: person-picked lane documents first, then NEW or CHANGED documents (newest first), then the backlog
+    # (never read, older first). A document read before whose md5 changed counts as changed.
+    for d in out:
+        prev = done.get(d["document_id"])
+        d["changed"] = bool(prev) and prev[0] != d["version_key"]
+    out.sort(key=fresh_key)
     return out, learn
+
+
+def fresh_key(d, now=None):
+    """sort key: lane learning first; then documents created / modified in the last 14 days or changed since their read,
+    newest first; then the never-read backlog, oldest document first (stable over nights)."""
+    import datetime as _dt
+    now = now or _dt.datetime.now(_dt.timezone.utc)
+    f = d.get("fresh")
+    recent = bool(d.get("changed")) or (f is not None and (now - f).days < 14)
+    return (not d.get("learn"), not recent, -(f.timestamp() if (recent and f) else 0), d["document_id"])
 
 
 def roster_entities(cur, ids):

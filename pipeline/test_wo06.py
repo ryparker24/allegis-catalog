@@ -280,5 +280,18 @@ check("R-037 an unpublished choice is never written",
 e = cl.expected({"content_flags": ["tax_id", "lp_pii", "something_else"]}, fs)
 check("expected() carries only the two R-037 flag codes", e["_content_contains"] == ["lp_pii", "tax_id"])
 
+# ------------------------------------------------------------------ CAT-WO-06.1 read new first
+import datetime as _dt
+now = _dt.datetime(2026, 11, 23, tzinfo=_dt.timezone.utc)
+docs = [dict(document_id=1, fresh=now - _dt.timedelta(days=400), learn=False, changed=False),     # backlog, oldest id
+        dict(document_id=2, fresh=now - _dt.timedelta(days=300), learn=False, changed=False),     # backlog
+        dict(document_id=900, fresh=now - _dt.timedelta(hours=3), learn=False, changed=False),    # new today
+        dict(document_id=901, fresh=now - _dt.timedelta(days=2), learn=False, changed=False),     # new this week
+        dict(document_id=5, fresh=now - _dt.timedelta(days=90), learn=False, changed=True),       # read before, md5 changed
+        dict(document_id=7, fresh=now - _dt.timedelta(days=500), learn=True, changed=False)]      # person-picked lane doc
+order = [d["document_id"] for d in sorted(docs, key=lambda d: pw.fresh_key(d, now))]
+check("CAT-WO-06.1 the pages step reads lane-learning documents first, then new / changed documents newest first, then the backlog oldest first",
+      order == [7, 900, 901, 5, 1, 2], str(order))
+
 print(f"\n{sum(R)}/{len(R)} passed")
 sys.exit(0 if all(R) else 1)
