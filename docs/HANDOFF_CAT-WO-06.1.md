@@ -59,3 +59,17 @@
 
 ## Apply plan (one "apply" for 06.1 + the labelling)
 1. `label_new_wo061 --release --apply` (614 files) · 2. `nightly.py --only derive,readback,resync,checklists --apply` (pages off): derive with the labels in place, read-back (first sight of the 614), re-sync (the 263 06.1 writes + Status etc. on the 614), checklists · 3. spot checks · 4. push main, deploy the Worker, `app-main` to the release commit, `drive_crawl.py` unchanged · 5. re-enable the nightly (now with the `label` step) · 6. CATWO061 RELEASED.
+
+## Release (Ryan: "apply", 2026-11-23)
+1. ENT-GP-P ruled (`provisional = false`); the nightly labelling of new LIMITED - Finance files approved with it.
+2. `label_new_wo061 --release --apply`: **614 labelled, 0 errors**, modifiedTime changed on 0 of 25 sampled (by kind / entity / fields as in the dry run).
+3. `nightly.py --only derive,readback,resync,checklists --apply` (code 63e1547, pages off; `nightly_20261123_0811.log`): derive ok · read-back read 46,873, 6 newly person-confirmed, errors 0 · **re-sync wrote 658 files** (Status 403 · Entity 219 · Subject code(s) 66 · Version family / role 26 · Supersedes 9 · Effective date 10 · Issued date 10 · Issuing entity 10 · stage 1), person-owned skipped 1, **errors 0**, modifiedTime changed on 0 of 41 sampled · checklists ok.
+4. Live spot checks (codes only): all 119 CIP-II 2025 Q4 PCAPs carry the label; 20/20 sampled match the catalog's kind, Status and Subject codes; GP entity on the Entity label 15/15 sampled GP-folder files.
+5. Tests: test_wo06 51/51 · test_wo061 11/11 · vitest 142/142 · tsc clean. main pushed (`192c61a..63e1547`). **Worker deployed, version `15def5fb-7c20-4541-87d6-fc1bf2249199`.**
+6. `app-main` moved to `63e1547`; task "Allegis Catalog nightly" **re-enabled** (next run 2026-11-23 22:00; steps crawl, portals, derive (+ pages, new first), **label**, readback, resync, checklists).
+7. The release session was interrupted after step 3 (host restart); steps 4–6 were completed on Ryan's second "apply" at 16:01. Nothing ran twice.
+
+**Final counts (main, 2026-11-23):** K1-SET Met 200 / On file 46 / Missing 167 / No roster 15 · PCAP-Q Met 341 / On file 31 / Missing 1,682 / No roster 49 · LP-SUB Met 70 / On file 62 / Missing 146 / No roster 7. Labelled files 46,873 (+614).
+- Restore point to delete after two clean nightlies: `pre-catwo061` (`br-curly-forest-bdgvcx3y`). `catwo06-throwaway` and `pre-catwo06` follow CAT-WO-06's own two-nightly rule.
+
+**CATWO061 RELEASED 63e1547d77bd31e2c9e11120164cdf6c540b4bbe** (2026-11-23): main + `app-main` on this commit, Worker version `15def5fb-7c20-4541-87d6-fc1bf2249199`, nightly task re-enabled. This line was added in a docs-only commit after the release commit.
