@@ -2,7 +2,7 @@
 
 *2026-11-24. Codes and counts only.*
 
-**Status:** built on git branch `cat-wo-06-2` (`6ffb49e`, from main `35ae559`), merged into main **locally** (not pushed). Restore point `pre-catwo062` = `br-fancy-credit-bdpg4p9u` (main LSN A/826B8CF0). The nightly stays enabled on `app-main` `63e1547`. **STOP for Ryan's apply.**
+**Status:** built on git branch `cat-wo-06-2` (`6ffb49e`, from main `35ae559`), merged into main **locally** (not pushed). Restore point `pre-catwo062` = `br-fancy-credit-bdpg4p9u` (main LSN A/826B8CF0). The nightly stays enabled on `app-main` `63e1547`. **RELEASED 2026-11-24** (below).
 
 ## Why
 The 2026-11-23 22:00 nightly re-wrote Parties on ~1,580 K-1 files. `apply_derive_wo02` counted K-1s per folder (`k1_folder`, used by K1-R3 "issued by a fund to its LPs", which needs 3+ K-1s in the folder) from the kinds **before** the run's own re-kinds (K1F / K1N make ~3,214 documents K-1s every night). A single derive pass undercounted and left K1-R3 unfired; the label step's second pass (CAT-WO-06.1) counted correctly and fired it. On a night without new files only the first pass would run and the re-sync would flip those files back.
@@ -19,3 +19,12 @@ The 2026-11-23 22:00 nightly re-wrote Parties on ~1,580 K-1 files. `apply_derive
 
 ## Apply plan
 Push main · deploy the Worker (no app change; keeps main and the Worker on one commit) · move `app-main` to the release commit (the nightly then runs the fix) · CATWO062 RELEASED. No Drive write is part of this release (the 49 Subject writes happen in the next nightly).
+
+## Release (Ryan: "apply", 2026-11-24 07:50 MST)
+1. Tests: vitest 142/142 · tsc clean (pipeline suites as above). main pushed (`96dbc10..5fc3f50`).
+2. **Worker deployed, version `a077fa14-1b0b-4153-98b6-3d1249329dc8`** (no app change; main and the Worker on one commit).
+3. `app-main` moved to `5fc3f50`; task "Allegis Catalog nightly" enabled, runs `C:\DriveCatalog\app-main\scripts\nightly.py --apply`, next run 2026-11-24 22:00 (the fix runs from tonight).
+4. No Drive write and no re-sync in this release. Restore points `pre-catwo062` (`br-fancy-credit-bdpg4p9u`) and `pre-catwo061` kept.
+- To check in tonight's log: re-sync Parties writes ~0 (the 49 Subject code(s) writes are expected).
+
+**CATWO062 RELEASED 5fc3f50c43890b68daef281486d47caa54f6b19f** (2026-11-24): main + `app-main` on this commit, Worker version `a077fa14-1b0b-4153-98b6-3d1249329dc8`, nightly enabled. This line was added in a docs-only commit after the release commit.
