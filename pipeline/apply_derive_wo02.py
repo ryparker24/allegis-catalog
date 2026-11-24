@@ -98,7 +98,9 @@ def run(conn, ruled=None, apply=True, log=print):
                               coalesce(v.requires_execution, false), v.stage, v.is_primary, f.file_type_family, v.fiscal_year
                        FROM app.v_find v JOIN cat.file f USING (file_id) WHERE v.document_id IS NOT NULL""")
         rows = cur.fetchall()
-        k1_folder = collections.Counter(r[4] for r in rows if r[5] == "k1")
+        # CAT-WO-06.2: count K-1s per folder with each document's FINAL kind (this run's re-kinds included); counting the
+        # kinds from before the re-kinds left K1-R3 unfired on a first pass and fired on a second (Parties flip-flop)
+        k1_folder = collections.Counter(r[4] for r in rows if (new_kind[r[1]][1] if r[1] in new_kind else r[5]) == "k1")
         # one result per document: prefer the primary copy's path/name
         rows.sort(key=lambda r: (r[1], not r[9]))
         # CAT-WO-05: R-031 portal postings (Status = Issued) and the R-032 status rules (proposals; Ryan vetoes at the dry run)

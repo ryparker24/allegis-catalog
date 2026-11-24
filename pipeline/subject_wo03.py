@@ -446,7 +446,7 @@ def run(conn, apply=False, staff=None, log=print):
             cur.executemany("INSERT INTO cat.doc_party (document_id, partner_code, entity_code, method, confidence) VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
                             [x[:5] for x in rows_party])
         if lane_upd:
-            cur.execute("CREATE TEMP TABLE _lane (document_id bigint, seq smallint, cand smallint, lane boolean, reason text) ON COMMIT DROP")
+            cur.execute("CREATE TEMP TABLE IF NOT EXISTS _lane (document_id bigint, seq smallint, cand smallint, lane boolean, reason text) ON COMMIT DROP"); cur.execute("TRUNCATE _lane")
             with cur.copy("COPY _lane FROM STDIN") as cp:
                 cp.set_types(["int8", "int2", "int2", "bool", "text"])
                 for x in lane_upd: cp.write_row(x)

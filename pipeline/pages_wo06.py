@@ -1094,7 +1094,7 @@ def apply_content(con, apply=True, log=print):
                            AND fiscal_year_auto IS NULL""", fills_fy)
         cur.executemany("""UPDATE cat.document SET fiscal_quarter_auto=%s, updated_at=now() WHERE document_id=%s AND fiscal_quarter_confirmed IS NULL
                            AND fiscal_quarter_auto IS NULL AND fye_flag_confirmed IS NULL""", fills_q)
-        cur.execute("CREATE TEMP TABLE _cd (document_id bigint, d text[]) ON COMMIT DROP")
+        cur.execute("CREATE TEMP TABLE IF NOT EXISTS _cd (document_id bigint, d text[]) ON COMMIT DROP"); cur.execute("TRUNCATE _cd")
         with cur.copy("COPY _cd FROM STDIN") as cp:
             cp.set_types(["int8", "text[]"])
             for k, v in dis.items():
