@@ -2,7 +2,7 @@
 
 *2026-11-24. Codes and counts only.*
 
-**Status:** built on git branch `cat-wo-06-2` (`6ffb49e`, from main `35ae559`), merged into main **locally** (not pushed). Restore point `pre-catwo062` = `br-fancy-credit-bdpg4p9u` (main LSN A/826B8CF0). The nightly stays enabled on `app-main` `63e1547`. **RELEASED 2026-11-24** (below).
+**Status:** built on git branch `cat-wo-06-2` (`6ffb49e`, from main `35ae559`), merged into main and released as `5fc3f50` (main + `app-main`). Restore point `pre-catwo062` = `br-fancy-credit-bdpg4p9u` (main LSN A/826B8CF0). **RELEASED 2026-11-24** (below).
 
 ## Why
 The 2026-11-23 22:00 nightly re-wrote Parties on ~1,580 K-1 files. `apply_derive_wo02` counted K-1s per folder (`k1_folder`, used by K1-R3 "issued by a fund to its LPs", which needs 3+ K-1s in the folder) from the kinds **before** the run's own re-kinds (K1F / K1N make ~3,214 documents K-1s every night). A single derive pass undercounted and left K1-R3 unfired; the label step's second pass (CAT-WO-06.1) counted correctly and fired it. On a night without new files only the first pass would run and the re-sync would flip those files back.
