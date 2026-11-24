@@ -180,10 +180,10 @@ describe("item 3 · Labels panel", () => {
 });
 
 describe("review fixes (Part 1 coder review)", () => {
-  it("#5 a stored view never keeps search text, and nested objects are rebuilt to their known shape", async () => {
+  it("#5 nested objects are rebuilt to their known shape (CAT-WO-12: a view now keeps its text term)", async () => {
     const { storedSpec } = await import("@/lib/views");
     const s = storedSpec({ filters: { signed_date: { from: "2024-01-01", evil: "x" } }, search: "some name", sort: { col: "kind", dir: "asc", junk: 1 } });
-    expect(s.search).toBeUndefined();
+    expect(s.search).toBe("some name");
     expect(s.sort).toEqual({ col: "kind", dir: "asc" });
     expect((s.filters as Record<string, unknown>).signed_date).toEqual({ from: "2024-01-01", to: undefined });
   });

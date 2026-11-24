@@ -15,20 +15,13 @@ import { LocationCell, truncPath } from "./Location";
 import { maskNames } from "./bus";
 import { COLUMN_BY_KEY, COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_PAGE_SIZE, PAGE_SIZES, PICK_FILTER_KEY, isSortable, type ColDef } from "@/lib/columns";
 import { display, type VocabList } from "@/lib/vocab";
+import {
+  chipsOf, clearAll, DEFAULT_LAYOUT, EMPTY, fromStored, headerSearch, isActive, isEdited, openView, restoredText, revert, setFilter as withFilter, setText,
+  storedNow as storedOf, TEXT_KEY, titleOf, VOCAB_OF, wire, type Current, type Layout, type Range, type Spec,
+} from "@/lib/findstate";
 
 type Facet = { value: string; n: number; label?: string };
 type Facets = Record<string, Facet[]>;
-type Range = { from?: string; to?: string };
-type Filters = Record<string, unknown> & {
-  kind?: string[]; entity?: string[]; portco?: string[]; fiscal_year?: string[]; stage?: string[]; tier?: string[];
-  period?: string[]; workstream?: string[]; issuer?: string[]; file_type_family?: string[];
-  primary_only?: boolean; is_primary?: "yes" | "no"; fy_range?: Range; modified_time?: Range; signed_date?: Range; effective_date?: Range;
-  file_id?: string; document_id?: string;
-  /** CAT-WO-04 R-029: off by default */
-  current_only?: boolean;
-};
-type Spec = { filters: Filters; search?: string; sort: { col: string; dir: "asc" | "desc" }; groupBy: string | null; page: number; pageSize: number };
-type Layout = { columns: string[]; widths: Record<string, number> };
 type FindResp = {
   total: number; page: number; pageSize: number; pageRows: number; rows: Row[]; notShown: NotShown; groups: { value: string; n: number }[];
   search: { nameMatches: number; nameCapped: boolean; nameSearchFailed: boolean } | null;
@@ -36,28 +29,20 @@ type FindResp = {
 type SavedView = { view_id: number; name: string; spec: Record<string, unknown>; folder_id: number | null };
 type Folder = { folder_id: number; name: string; parent_id: number | null };
 
-const EMPTY: Spec = { filters: {}, sort: { col: "modified_time", dir: "desc" }, groupBy: null, page: 0, pageSize: DEFAULT_PAGE_SIZE };
-const DEFAULT_LAYOUT: Layout = { columns: DEFAULT_COLUMNS, widths: {} };
 const GROUPS: [string, string][] = [["", "No grouping"], ["kind", "Kind"], ["entity", "Entity"], ["portco", "Portco"], ["fiscal_year", "Fiscal year"], ["stage", "Signing stage"], ["tier", "Handling"], ["workstream", "Workstream"], ["location", "Location"]];
 /** Filter-bar fields (Datum's filter bar). The same filters also sit in each column header. */
 const BAR: { key: string; label: string; facet: string; vocab?: VocabList }[] = [
   { key: "kind", label: "Kind", facet: "kind", vocab: "kind" }, { key: "entity", label: "Entity", facet: "entity" }, { key: "portco", label: "Portco", facet: "portco" },
   { key: "fiscal_year", label: "Fiscal year", facet: "fiscal_year" }, { key: "stage", label: "Signing stage", facet: "stage", vocab: "stage" }, { key: "tier", label: "Handling", facet: "tier", vocab: "tier" },
 ];
-const FILTER_LABEL: Record<string, string> = {
-  kind: "Kind", entity: "Entity", portco: "Portco", fiscal_year: "Fiscal year", stage: "Signing stage", tier: "Handling", period: "Period", workstream: "Workstream",
-  issuer: "Issuer type", file_type_family: "File type", primary_only: "Primary copy", is_primary: "Primary copy", fy_range: "Fiscal year", modified_time: "Modified",
-  signed_date: "Signed date", effective_date: "Effective date", file_id: "File ID", document_id: "Catalog ID",
-  current_only: "Current versions only", version_role: "Version", versions: "Versions",
-  published_channel: "Published to", published_date: "Posted date", portal_kind_conflict: "Portal kind conflict",
-};
-const VOCAB_OF: Record<string, VocabList | undefined> = { kind: "kind", stage: "stage", tier: "tier", period: "period", workstream: "workstream", issuer: "issuer", version_role: "version_role", published_channel: "published_channel" };
 const SAVE_DEBOUNCE = 800;
+/** CAT-WO-12: the in-window text field commits after this pause (or on Enter). */
+export const TEXT_DEBOUNCE = 300;
+/** CAT-WO-12: this tab's text term (client only, never the DB), so Find comes back with it after Review / a reload. */
+const TEXT_KEY_SESSION = "catalog.find.q";
 
 const width = (layout: Layout, k: string) => layout.widths[k] ?? COLUMN_BY_KEY.get(k)?.width ?? 140;
-const isActive = (v: unknown) => Array.isArray(v) ? v.length > 0 : v && typeof v === "object" ? Object.values(v).some((x) => x != null && x !== "") : v != null && v !== "" && v !== false;
 const optLabel = (key: string, o: Facet) => o.label ?? (o.value !== "(none)" && VOCAB_OF[key] ? display(VOCAB_OF[key]!, o.value) : o.value);
-const rangeText = (r: Range) => r.from && r.to ? `${r.from} – ${r.to}` : r.from ? `from ${r.from}` : `to ${r.to}`;
 
 function groupValue(r: Row, g: string): string[] {
   const v = g === "entity" ? r.entities : g === "portco" ? r.portcos : (r as unknown as Record<string, unknown>)[g];
@@ -71,30 +56,6 @@ export function pageList(cur: number, last: number): (number | "gap")[] {
   for (const n of [...s].sort((a, b) => a - b)) { if (prev >= 0 && n - prev > 1) out.push("gap"); out.push(n); prev = n; }
   return out;
 }
-/** spec + layout -> what the server stores / runs. Empty filters dropped. */
-function wire(spec: Spec): Spec {
-  const filters: Filters = {};
-  for (const [k, v] of Object.entries(spec.filters)) if (isActive(v)) filters[k] = v;
-  return { ...spec, filters, search: spec.search || undefined };
-}
-function fromStored(x: Record<string, unknown>): { spec: Spec; layout: Layout | null } {
-  const spec: Spec = {
-    filters: (x.filters as Filters) ?? {}, sort: (x.sort as Spec["sort"]) ?? EMPTY.sort, groupBy: (x.groupBy as string | null) ?? null, page: 0,
-    pageSize: PAGE_SIZES.includes(Number(x.pageSize) as never) ? Number(x.pageSize) : DEFAULT_PAGE_SIZE,
-  };
-  const cols = Array.isArray(x.columns) ? (x.columns as string[]).filter((c) => COLUMN_BY_KEY.has(c)) : null;
-  return { spec, layout: cols?.length ? { columns: cols.includes("name") ? cols : ["name", ...cols], widths: (x.widths as Record<string, number>) ?? {} } : null };
-}
-
-/** Normalized form of a stored view, for "changed" detection: active filters only, default layout filled in. */
-function fingerprint(x: Record<string, unknown>): string {
-  const s = fromStored(x);
-  const l = s.layout ?? DEFAULT_LAYOUT;
-  const w = wire({ ...s.spec, search: undefined });
-  const widths = Object.fromEntries(Object.entries(l.widths).filter(([k, v]) => v !== COLUMN_BY_KEY.get(k)?.width).sort());
-  return JSON.stringify({ f: Object.fromEntries(Object.entries(w.filters).sort()), s: w.sort, g: w.groupBy ?? null, p: w.pageSize, c: l.columns, w: widths });
-}
-
 // ------------------------------------------------------------------ small pieces
 export function Pop({ open, onClose, children, className = "popover", style }: { open: boolean; onClose: () => void; children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -158,6 +119,29 @@ export function ContainsInput({ value, onChange }: { value: string; onChange: (s
   );
 }
 
+/** CAT-WO-12 item 2: the in-window text filter. Commits ~300 ms after typing stops or on Enter; Esc clears; × when non-empty.
+ *  It writes the same `q` as the header box but keeps every other filter. "/" still focuses the header box (typing here is exempt). */
+export function TextSearchField({ value, onChange, inputRef }: { value: string; onChange: (q: string) => void; inputRef?: React.Ref<HTMLInputElement> }) {
+  const [v, setV] = useState(value);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => { setV(value); }, [value]);           // a chip ×, Clear all, a header search or a view sets it from outside
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  const commit = (x: string) => { if (timer.current) clearTimeout(timer.current); timer.current = null; if (x.trim() !== value) onChange(x.trim()); };
+  return (
+    <div className="textfilter" role="search">
+      <Icon name="search" />
+      <input ref={inputRef} className="input" type="text" value={v} maxLength={100} placeholder="Search in this list (names, codes)"
+        aria-label="Search in this list; combines with the other filters"
+        onChange={(e) => { const x = e.target.value; setV(x); if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(() => commit(x), TEXT_DEBOUNCE); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); commit(v); }
+          else if (e.key === "Escape") { e.preventDefault(); setV(""); commit(""); }
+        }} />
+      {v ? <button className="clear" aria-label="Clear the text filter" onClick={() => { setV(""); commit(""); }}>×</button> : null}
+    </div>
+  );
+}
+
 function FlagInput({ value, onChange }: { value: "yes" | "no" | undefined; onChange: (v: "yes" | "no" | undefined) => void }) {
   return (
     <div className="seg" role="radiogroup">
@@ -179,7 +163,8 @@ export function FindClient() {
   const [err, setErr] = useState<string | null>(null);
   const [open, setOpen] = useState<Row | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
-  const [current, setCurrent] = useState<{ id: number; name: string; stored: string } | null>(null);
+  const [current, setCurrent] = useState<Current | null>(null);
+  const textRef = useRef<HTMLInputElement | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [pop, setPop] = useState<string | null>(null); // which popover is open
   const [popAt, setPopAt] = useState<{ top: number; left: number }>({ top: 0, left: 0 }); // column popovers: fixed, so the grid's scroll box can't clip them
@@ -202,48 +187,68 @@ export function FindClient() {
     (async () => {
       const u = new URLSearchParams(window.location.search);
       const viewId = Number(u.get("view"));
-      const q = u.get("q") ?? "";
+      // CAT-WO-12: ?q= only ever comes from the header box on another page: a fresh search. Drop it (and ?view=) from the
+      // address so a reload restores the last state instead of starting over.
+      const q = u.get("q");
+      if (u.has("q") || u.has("view")) {
+        u.delete("q"); u.delete("view");
+        const rest = u.toString();
+        window.history.replaceState(null, "", window.location.pathname + (rest ? "?" + rest : ""));
+      }
       // CAT-WO-05: Review › Portal kind conflict opens Find on those documents
       if (u.get("portal_conflict") === "1") { setSpec({ ...EMPTY, filters: { portal_kind_conflict: true } } as Spec); return; }
+      if (q != null && q.trim()) { startFresh(q); return; }
       try {
         if (viewId) {
           const r = await api<{ views: SavedView[] }>("/api/views");
           const v = r.views.find((x) => x.view_id === viewId);
-          if (v) { applyStored(v.view_id, v.name, v.spec, q); return; }
+          if (v) { applyStored(v.view_id, v.name, v.spec); return; }
         }
         const p = await api<{ value: Record<string, unknown> | null }>("/api/prefs?key=find");
         if (userActed.current) return;
+        let sessionQ: string | null = null;
+        try { sessionQ = sessionStorage.getItem(TEXT_KEY_SESSION); } catch { /* ignore */ }
         if (p.value) {
           const s = fromStored(p.value);
-          setSpec({ ...s.spec, search: q || undefined });
           if (s.layout) setLayout(s.layout);
           const vid = Number(p.value.viewId);
+          let view: SavedView | undefined;
           if (vid) {
             const r = await api<{ views: SavedView[] }>("/api/views").catch(() => ({ views: [] as SavedView[] }));
-            const v = r.views.find((x) => x.view_id === vid);
-            if (v) { setCurrent({ id: v.view_id, name: v.name, stored: fingerprint(v.spec) }); emit(EV.currentView, { viewId: v.view_id }); }
+            view = r.views.find((x) => x.view_id === vid);
+            if (view) { setCurrent(openView(view.view_id, view.name, view.spec)); emit(EV.currentView, { viewId: view.view_id }); }
           }
-        } else if (q) setSpec({ ...EMPTY, search: q });
+          // the pref never holds the text term: this tab's own term, else the open view's
+          setSpec({ ...s.spec, search: restoredText(sessionQ, view?.spec ?? null) });
+        } else if (sessionQ) setSpec({ ...EMPTY, search: restoredText(sessionQ, null) });
       } catch { /* defaults */ }
       finally { setReady(true); }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const applyStored = (id: number | null, name: string, stored: Record<string, unknown>, search?: string) => {
+  const applyStored = (id: number | null, name: string, stored: Record<string, unknown>) => {
     const s = fromStored(stored);
-    setSpec({ ...s.spec, search: search || undefined });
+    setSpec(s.spec);
     setLayout(s.layout ?? DEFAULT_LAYOUT);
-    setCurrent(id ? { id, name, stored: fingerprint(stored) } : null);
+    setCurrent(id ? openView(id, name, stored) : null);
     setChecked(new Set());
     setReady(true);
     emit(EV.currentView, { viewId: id });
   };
+  /** CAT-WO-12 item 3: the header search leaves the saved view and every other filter; only the term remains. */
+  const startFresh = (q: string) => {
+    setSpec((s) => headerSearch(s, q));
+    setCurrent(null);
+    setChecked(new Set());
+    setReady(true);
+    emit(EV.currentView, { viewId: null });
+  };
 
   // shell events: a view clicked in the rail; a search from the top bar
   useEffect(() => {
-    const a = on<ViewRef>(EV.applyView, (v) => { userActed.current = true; applyStored(v.view_id, v.name, v.spec, undefined); });
-    const b = on<{ q: string }>(EV.search, (d) => { userActed.current = true; setReady(true); setSpec((s) => ({ ...s, page: 0, search: d.q || undefined })); });
+    const a = on<ViewRef>(EV.applyView, (v) => { userActed.current = true; applyStored(v.view_id, v.name, v.spec); });
+    const b = on<{ q: string }>(EV.search, (d) => { userActed.current = true; startFresh(d.q); });
     // the rail renamed or deleted the view shown here (coder review #8)
     const c = on(EV.treeChanged, async () => {
       const r = await api<{ views: SavedView[] }>("/api/views").catch(() => null);
@@ -298,43 +303,31 @@ export function FindClient() {
     }, SAVE_DEBOUNCE);
     return () => clearTimeout(t);
   }, [spec, layout, current, ready]);
+  useEffect(() => {
+    if (!ready) return;
+    try { sessionStorage.setItem(TEXT_KEY_SESSION, spec.search ?? ""); } catch { /* ignore */ }
+  }, [spec.search, ready]);
 
   // ---------------------------------------------------------------- spec helpers
-  const setFilter = (k: string, v: unknown) => setSpec((s) => {
-    const f: Filters = { ...s.filters, [k]: v };
-    if (k === "is_primary") delete f.primary_only; // one "primary copy" filter at a time
-    if (!isActive(v)) delete f[k];
-    return { ...s, page: 0, filters: f };
-  });
+  const setFilter = (k: string, v: unknown) => setSpec((s) => withFilter(s, k, v));
+  const setTerm = (q: string) => setSpec((s) => setText(s, q));
   const sortBy = (c: string) => { if (!isSortable(c)) return; setSpec((s) => ({ ...s, page: 0, sort: { col: c, dir: s.sort.col === c && s.sort.dir === "desc" ? "asc" : "desc" } })); };
   const setPage = (p: number) => setSpec((s) => ({ ...s, page: p }));
 
-  const chips = useMemo(() => {
-    const out: { key: string; label: string; text: string }[] = [];
-    const f = spec.filters;
-    for (const [k, v] of Object.entries(f)) {
-      if (!isActive(v)) continue;
-      let text: string;
-      if (Array.isArray(v)) text = v.map((x) => (VOCAB_OF[k] && x !== "(none)" ? display(VOCAB_OF[k]!, String(x)) : String(x))).join(", ");
-      else if (k === "primary_only" || k === "current_only") text = "on";
-      else if (k === "is_primary") text = v === "yes" ? "yes" : "no";
-      else if (typeof v === "object") text = rangeText(v as Range);
-      else text = `contains “${String(v)}”`;
-      out.push({ key: k, label: FILTER_LABEL[k] ?? k, text });
-    }
-    return out;
-  }, [spec.filters]);
+  const chips = useMemo(() => chipsOf(spec), [spec]);
+  /** Filters panel › Text: takes you to the in-window field. */
+  const focusText = () => { setPop(null); textRef.current?.focus(); textRef.current?.select(); };
 
   // ---------------------------------------------------------------- views
   const loadFolders = () => api<{ folders: Folder[] }>("/api/views").then((r) => setFolders(r.folders)).catch(() => {});
-  const storedNow = () => ({ ...wire({ ...spec, search: undefined }), ...layout });
-  const dirty = current ? fingerprint(storedNow() as unknown as Record<string, unknown>) !== current.stored : false;
+  const storedNow = () => storedOf(spec, layout);
+  const dirty = isEdited(current, spec, layout);
   const saveView = async () => {
     const name = saveName.trim();
     if (!name) return;
     try {
       const r = await api<{ id: number }>("/api/views", { method: "POST", body: JSON.stringify({ name, spec: storedNow(), folder_id: saveFolder ? Number(saveFolder) : null }) });
-      setCurrent({ id: r.id, name, stored: fingerprint(storedNow() as unknown as Record<string, unknown>) });
+      setCurrent(openView(r.id, name, storedNow()));
       emit(EV.currentView, { viewId: r.id });
       emit(EV.viewsChanged);
       setPop(null); setSaveName(""); setNote(`Saved “${name}”.`);
@@ -344,10 +337,16 @@ export function FindClient() {
     if (!current) return;
     try {
       await api("/api/views", { method: "PATCH", body: JSON.stringify({ view_id: current.id, spec: storedNow() }) });
-      setCurrent({ ...current, stored: fingerprint(storedNow() as unknown as Record<string, unknown>) });
+      setCurrent(openView(current.id, current.name, storedNow()));
       emit(EV.viewsChanged); setNote(`Updated “${current.name}”.`); setPop(null);
     } catch (e) { setNote(`Not updated: ${(e as Error).message}`); }
   };
+  const revertView = () => {
+    if (!current) return;
+    const r = revert(current);
+    setSpec(r.spec); setLayout(r.layout); setChecked(new Set()); setPop(null); setNote(`Reverted to “${current.name}”.`);
+  };
+  const openSave = () => { loadFolders(); setSaveName(current ? `${current.name} (copy)` : ""); setPop(pop === "save" ? null : "save"); };
   const resetAll = () => { setSpec(EMPTY); setLayout(DEFAULT_LAYOUT); setCurrent(null); emit(EV.currentView, { viewId: null }); setPop(null); };
 
   // ---------------------------------------------------------------- export
@@ -423,6 +422,7 @@ export function FindClient() {
     return show(k, v);
   };
 
+  const title = titleOf(current, dirty, spec);
   const cols = layout.columns.map((k) => COLUMN_BY_KEY.get(k)!).filter(Boolean);
   const tableWidth = 40 + cols.reduce((n, c) => n + width(layout, c.key), 0);
   const groupCounts = useMemo(() => new Map((res?.groups ?? []).map((g) => [g.value, g.n])), [res]);
@@ -461,13 +461,14 @@ export function FindClient() {
   return (
     <div data-find-page>
       <PageHeader
-        title={current ? current.name : "Find"}
-        info={<>Every file carrying the Allegis Document label, filtered and sorted in the catalog database. Each page is checked live against Drive as you: files you can&apos;t open are left out and counted, and values shown are the labels on the file today.</>}
-        desc={spec.search ? <>Search: “{spec.search}” <button className="link small" onClick={() => setSpec((s) => ({ ...s, page: 0, search: undefined }))}>clear</button></> : current ? <span className="cap">Saved view{dirty ? " · changed" : ""}</span> : null}
+        title={<>{title.name}{title.edited ? <span className="edited"> · edited</span> : null}</>}
+        info={<>Every file carrying the Allegis Document label, filtered and sorted in the catalog database. Each page is checked live against Drive as you: files you can&apos;t open are left out and counted, and values shown are the labels on the file today. The top search starts a fresh search; the search field in the list adds text to the filters in force.</>}
+        desc={current ? <span className="cap">Saved view</span> : null}
         actions={<>
           {current && dirty ? <button className="btn" onClick={updateView}>Update view</button> : null}
+          {current && dirty ? <button className="btn" onClick={revertView}>Revert</button> : null}
           <div className="pop-wrap">
-            <button className="btn primary" onClick={() => { loadFolders(); setSaveName(current && !dirty ? `${current.name} (copy)` : ""); setPop(pop === "save" ? null : "save"); }} aria-expanded={pop === "save"}>Save view</button>
+            <button className={`btn${current && dirty ? "" : " primary"}`} onClick={openSave} aria-expanded={pop === "save"}>{current && dirty ? "Save as new view" : "Save view"}</button>
             <Pop open={pop === "save"} onClose={closePop} className="popover right">
               <div className="field" style={{ minWidth: 260 }}>
                 <span className="cap">View name</span>
@@ -479,18 +480,18 @@ export function FindClient() {
                   <option value="">Top level</option>
                   {folders.filter((f) => f.parent_id == null).flatMap((f) => [
                     <option key={f.folder_id} value={f.folder_id}>{f.name}</option>,
-                    ...folders.filter((k) => k.parent_id === f.folder_id).map((k) => <option key={k.folder_id} value={k.folder_id}>{`  ${f.name} / ${k.name}`}</option>),
+                    ...folders.filter((k) => k.parent_id === f.folder_id).map((k) => <option key={k.folder_id} value={k.folder_id}>{`  ${f.name} / ${k.name}`}</option>),
                   ])}
                 </select>
               </div>
-              <p className="small muted" style={{ margin: "8px 0" }}>Saves filters, sort, columns, order and widths. A name already in use is overwritten.</p>
+              <p className="small muted" style={{ margin: "8px 0" }}>Saves filters, the search text, sort, columns, order and widths. A name already in use is overwritten.</p>
               <div className="row"><span /><button className="btn sm primary" onClick={saveView} disabled={!saveName.trim()}>Save</button></div>
             </Pop>
           </div>
           <div className="pop-wrap">
             <button className="btn" aria-label="More actions" aria-expanded={pop === "more"} onClick={() => setPop(pop === "more" ? null : "more")}><Icon name="more" /></button>
             <Pop open={pop === "more"} onClose={closePop} className="menu">
-              <button onClick={() => { setSpec((s) => ({ ...s, page: 0, filters: {} })); setPop(null); }}>Clear filters</button>
+              <button onClick={() => { setSpec(clearAll); setPop(null); }}>Clear filters</button>
               <button onClick={() => { setLayout(DEFAULT_LAYOUT); setPop(null); }}>Reset columns and widths</button>
               <button onClick={resetAll}>Start over (all labelled files)</button>
             </Pop>
@@ -505,7 +506,7 @@ export function FindClient() {
           <div className="filterbar">
             <button className="btn sm" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen}><Icon name="filter" />Filters</button>
             <span className="summary">{chips.length ? `${chips.length} filter${chips.length > 1 ? "s" : ""}` : "No filters"}</span>
-            {chips.length ? <button className="link small" onClick={() => setSpec((s) => ({ ...s, page: 0, filters: {} }))}>Clear all</button> : null}
+            {chips.length ? <button className="link small" onClick={() => setSpec(clearAll)}>Clear all</button> : null}
             <div className="tools">
               <div className="pop-wrap">
                 <button className="btn sm" onClick={() => setPop(pop === "cols" ? null : "cols")} aria-expanded={pop === "cols"}><Icon name="columns" />Columns</button>
@@ -529,6 +530,12 @@ export function FindClient() {
           </div>
           {filtersOpen ? (
             <div className="filter-fields">
+              <div className="field">
+                <span className="cap">Text</span>
+                <button className="trigger" onClick={focusText} title="Search in this list: names and codes, combined with the other filters">
+                  <span className="val">{spec.search ? `“${spec.search}”` : "Any"}</span><Icon name="search" className="small" />
+                </button>
+              </div>
               {BAR.map((b) => {
                 const v = (spec.filters[b.key] as string[] | undefined) ?? [];
                 const id = `bar-${b.key}`;
@@ -562,13 +569,13 @@ export function FindClient() {
               </div>
             </div>
           ) : null}
-          {chips.length ? (
-            <div className="chips" aria-label="Active filters">
-              {chips.map((c) => (
-                <span key={c.key} className="chip"><b>{c.label}</b>{c.text}<button aria-label={`Remove ${c.label} filter`} onClick={() => setFilter(c.key, undefined)}>×</button></span>
-              ))}
-            </div>
-          ) : null}
+          {/* CAT-WO-12: the in-window text filter (combines with the others) and the active-filter chips, TEXT first */}
+          <div className="chips" aria-label="Active filters">
+            <TextSearchField value={spec.search ?? ""} onChange={setTerm} inputRef={textRef} />
+            {chips.map((c) => (
+              <span key={c.key} className={`chip${c.key === TEXT_KEY ? " text" : ""}`}><b>{c.label}</b>{c.text}<button aria-label={`Remove ${c.label} filter`} onClick={() => setFilter(c.key, undefined)}>×</button></span>
+            ))}
+          </div>
 
           {/* selection + status */}
           <div className="selbar">
@@ -680,7 +687,7 @@ export function FindClient() {
               ))}
               {res && !res.rows.length ? (
                 <tbody><tr><td className="empty" colSpan={cols.length + 1}>
-                  {res.total ? "Nothing on this page that you can open in Drive. Try the next page." : "No files match. Remove a filter or clear the search."}
+                  {res.total ? "Nothing on this page that you can open in Drive. Try the next page." : "No files match. Remove a filter or clear the text."}
                 </td></tr></tbody>
               ) : null}
             </table>

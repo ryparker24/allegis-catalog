@@ -15,11 +15,12 @@ export function cleanName(x: unknown, max: number): string | null {
   return s && s.length <= max ? s : null;
 }
 
-/** View spec as stored: the validated FindSpec plus its layout (columns, order, widths), page reset to 0. */
+/** View spec as stored: the validated FindSpec plus its layout (columns, order, widths), page reset to 0.
+ *  CAT-WO-12: the text term (`search`) is a filter now and is stored with the view, by Ryan's decision of 2026-11-24
+ *  (it reverses CAT-WO-02's "search text is never stored" for saved views only; the last-state pref still drops it). */
 export function storedSpec(x: unknown): Record<string, unknown> {
-  const { search: _search, ...spec } = parseSpec(x); // search text is never stored (it can hold name fragments)
-  void _search;
-  return { ...spec, page: 0, ...parseLayout(x) };
+  const { search, ...spec } = parseSpec(x);
+  return { ...spec, ...(search ? { search } : {}), page: 0, ...parseLayout(x) };
 }
 
 export async function listTree(D: Db, owner: string): Promise<{ folders: FolderRow[]; views: ViewRow[] }> {

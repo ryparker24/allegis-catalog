@@ -36,7 +36,6 @@ export function AppShell({ email, active, signedIn, children }: { email: string 
 
   useEffect(() => {
     try { setCollapsed(localStorage.getItem(COLLAPSE_KEY) === "1"); } catch { /* ignore */ }
-    try { setQ(new URLSearchParams(window.location.search).get("q") ?? ""); } catch { /* ignore */ }
     if (signedIn) api<{ reviewOpen: number; nightly?: Nightly | null }>("/api/nav").then((r) => { setReviewOpen(r.reviewOpen); setNightly(r.nightly ?? null); }).catch(() => {});
     const k = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
@@ -54,8 +53,11 @@ export function AppShell({ email, active, signedIn, children }: { email: string 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const term = q.trim();
+    if (!term) return;
+    setQ(""); // CAT-WO-12: the box empties; the term shows as the TEXT chip and in the list's own search field
+    // a fresh search: Find clears every other filter and leaves the open saved view
     if (onFindPage()) emit(EV.search, { q: term });
-    else window.location.href = term ? `/?q=${encodeURIComponent(term)}` : "/";
+    else window.location.href = `/?q=${encodeURIComponent(term)}`;
   };
   const initials = (email ?? "?").split("@")[0].split(/[._-]/).filter(Boolean).map((s) => s[0]!.toUpperCase()).slice(0, 2).join("") || "?";
 
@@ -96,7 +98,7 @@ export function AppShell({ email, active, signedIn, children }: { email: string 
           <form className="search" role="search" onSubmit={submit}>
             <Icon name="search" />
             <input ref={searchRef} type="search" value={q} onChange={(e) => setQ(e.target.value)} disabled={!signedIn}
-              placeholder="Search names, codes… ( / )" aria-label="Search names, kinds, entity and portco codes" maxLength={100} />
+              placeholder="Search names, codes… ( / )" aria-label="New search: names, kinds, entity and portco codes (clears the filters in force)" maxLength={100} />
           </form>
           <div className="right">
             <button ref={labelsBtn} className="btn-rail" onClick={() => setLabelsOpen(true)} aria-haspopup="dialog" disabled={!signedIn}>
@@ -124,7 +126,7 @@ export function AppShell({ email, active, signedIn, children }: { email: string 
 }
 
 /** Page header: mono breadcrumb, serif title with an ⓘ chip, actions on the right. */
-export function PageHeader({ title, info, actions, desc }: { title: string; info?: React.ReactNode; actions?: React.ReactNode; desc?: React.ReactNode }) {
+export function PageHeader({ title, info, actions, desc }: { title: React.ReactNode; info?: React.ReactNode; actions?: React.ReactNode; desc?: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement | null>(null);
   useOutside(ref, () => setOpen(false), open);
