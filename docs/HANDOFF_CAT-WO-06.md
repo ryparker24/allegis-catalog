@@ -132,3 +132,6 @@ Projected from item 0: ~7.6 min a night (≈196 documents), at most ~19 min at t
 - Follow-ups: the CIP-II 2025 investor K-1s / PCAPs are not in the catalog (594 Missing rows); `ops.nightly_run` row `nightly_20261121_1151_dry` still shows running (status CHECK has no "aborted").
 
 **CATWO06 RELEASED 9ec3c6c48bd3067d513a2875fc510995255edbac** (2026-11-22): main + `app-main` on this commit, Worker version `60945591-2874-4e36-bbaa-cff42e9d01ae`, nightly task re-enabled (next run 2026-11-22 22:00 from `app-main`). This line was added in a docs-only commit after the release commit.
+
+**Clean-up (2026-11-24):** two clean nightlies after release (2026-11-22 22:00 and 2026-11-23 22:00, both NIGHTLY OK). Neon branches deleted at 2026-11-24 06:32 UTC by the coordinator session on Ryan's approval: throwaway `catwo06-throwaway` (`br-misty-paper-bd23sm4c`) and restore point `pre-catwo06` (`br-tiny-recipe-bd90no1v`). Confirmed gone from the branch list. (`C:\DriveCatalog\catwo06_branch_url.txt` now points at a deleted endpoint.)
+
