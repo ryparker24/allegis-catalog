@@ -106,9 +106,12 @@ SELECT m.zip_file_id, m.parent_member, m.member_path, m.is_dir, m.size_bytes, m.
          ORDER BY (f.drive_name = 'LIMITED - Finance') DESC, f.file_id LIMIT 1)                                   AS on_drive_file_id
 FROM cat.zip_member m;
 
+CREATE OR REPLACE VIEW app.v_zip_listing AS
+SELECT zip_file_id, status, member_count, listed_at FROM cat.zip_listing;
+
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'catalog_app') THEN
-    GRANT SELECT ON app.v_zip_member, cat.zip_listing TO catalog_app;
+    GRANT SELECT ON app.v_zip_member, app.v_zip_listing TO catalog_app;   -- the app role has no USAGE on cat
   END IF;
 END $$;
 

@@ -21,7 +21,7 @@ export async function GET(req: Request) {
   if (!FILE_ID_RE.test(fileId)) return json({ error: "bad_file_id" }, 400);
   const D = db(env);
   const z = await D.rows<{ status: string; member_count: number; listed_at: string }>(
-    "SELECT status, member_count, listed_at::text AS listed_at FROM cat.zip_listing WHERE zip_file_id = $1", [fileId]);
+    "SELECT status, member_count, listed_at::text AS listed_at FROM app.v_zip_listing WHERE zip_file_id = $1", [fileId]);
   const acc0 = await accessFor(g.session.at, [fileId]);
   if (acc0.expired) return json({ error: "signin_required", login: "/api/auth/login" }, 401);
   if (acc0.map.get(fileId)?.state !== "ok") return json({ error: "no_access" }, 403);
