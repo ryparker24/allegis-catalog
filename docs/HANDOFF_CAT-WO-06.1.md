@@ -73,3 +73,5 @@
 - Restore point to delete after two clean nightlies: `pre-catwo061` (`br-curly-forest-bdgvcx3y`). `catwo06-throwaway` and `pre-catwo06` follow CAT-WO-06's own two-nightly rule.
 
 **CATWO061 RELEASED 63e1547d77bd31e2c9e11120164cdf6c540b4bbe** (2026-11-23): main + `app-main` on this commit, Worker version `15def5fb-7c20-4541-87d6-fc1bf2249199`, nightly task re-enabled. This line was added in a docs-only commit after the release commit.
+
+**Clean-up (2026-11-25):** restore point `pre-catwo061` (`br-curly-forest-bdgvcx3y`) deleted at 2026-11-25 16:14 UTC by the coordinator session on Ryan's choice (09:14 MST); confirmed gone from the branch list. `pre-catwo062` stays.
