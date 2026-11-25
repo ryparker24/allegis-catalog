@@ -45,6 +45,8 @@ export function linkEdits(key: string, live: Pick<LiveValues, "entities">): Edit
   if (period && Object.hasOwn(ch("period"), period)) out.period = period;
   return out;
 }
+/** CAT-WO-13 (R-058): how often a rule expects a document per entity (ops.requirement_cadence; no row = annual) */
+export const CADENCES = ["quarterly", "annual", "none"] as const;
 export const RESULTS = ["missing", "on_file", "none_found", "met", "not_required", "no_roster", "applicability_not_set"] as const;
 const SORT: Record<string, string> = {
   urgency: "urgency", entity: "entity_code", partner: "partner_code", period: "fiscal_year", result: "result",
@@ -57,7 +59,7 @@ export const PAGE_SIZES = [10, 25, 100];
 
 export class SpecError extends Error {}
 export interface ChecklistSpec {
-  rule: string; entity: string | null; fy: number | null; q: number | null; results: string[];
+  rule: string; entity: string | null; fy: number | null; q: number | null; results: string[]; cadence: string | null;
   sort: { col: string; dir: "asc" | "desc" }; page: number; pageSize: number;
 }
 
@@ -70,6 +72,8 @@ export function parseChecklistSpec(u: URLSearchParams): ChecklistSpec {
   if (fy !== null && !(Number.isInteger(fy) && fy >= 1990 && fy <= 2100)) throw new SpecError("fy");
   const q = u.get("q") ? Number(u.get("q")) : null;
   if (q !== null && ![1, 2, 3, 4].includes(q)) throw new SpecError("q");
+  const cadence = u.get("cadence") || null;
+  if (cadence && !(CADENCES as readonly string[]).includes(cadence)) throw new SpecError("cadence");
   const results = (u.get("result") ?? "").split(",").filter(Boolean);
   if (!results.every((r) => (RESULTS as readonly string[]).includes(r))) throw new SpecError("result");
   const col = u.get("sort") ?? "urgency";
@@ -77,7 +81,7 @@ export function parseChecklistSpec(u: URLSearchParams): ChecklistSpec {
   const pageSize = Number(u.get("pageSize") ?? 25);
   if (!PAGE_SIZES.includes(pageSize)) throw new SpecError("pageSize");
   const page = Math.max(0, Math.min(10_000, Number(u.get("page") ?? 0) || 0));
-  return { rule, entity, fy, q, results, sort: { col, dir: u.get("dir") === "desc" ? "desc" : "asc" }, page, pageSize };
+  return { rule, entity, fy, q, results, cadence, sort: { col, dir: u.get("dir") === "desc" ? "desc" : "asc" }, page, pageSize };
 }
 
 export function checklistQuery(s: ChecklistSpec): { sql: string; countsSql: string; params: unknown[]; scopeParams: unknown[] } {
@@ -87,6 +91,7 @@ export function checklistQuery(s: ChecklistSpec): { sql: string; countsSql: stri
   if (s.entity) scope.push(`r.entity_code = ${p(s.entity)}`);
   if (s.fy !== null) scope.push(`r.fiscal_year = ${p(s.fy)}`);
   if (s.q !== null) scope.push(`r.fiscal_quarter = ${p(s.q)}`);
+  if (s.cadence) scope.push(`r.cadence = ${p(s.cadence)}`);
   const scopeParams = [...params];
   const where = [...scope];
   if (s.results.length) where.push(`r.result = ANY(${p(s.results)}::text[])`);
@@ -96,7 +101,7 @@ export function checklistQuery(s: ChecklistSpec): { sql: string; countsSql: stri
     params, scopeParams,
     // names: app.v_party only (display name beside the code; to the screen, never logged)
     sql: `SELECT r.req_key, r.rule_id, r.entity_code, r.partner_code, r.fiscal_year, r.fiscal_quarter, r.result, r.sub_status, r.urgency,
-                 r.best_file_id, r.best_kind, r.best_stage, r.best_status, r.best_date, r.best_reason, r.best_source, r.best_out_of_scope, r.best_page,
+                 r.best_file_id, r.best_kind, r.best_stage, r.best_status, r.best_date, r.best_reason, r.best_source, r.best_out_of_scope, r.best_page, r.cadence,
                  r.n_candidates, r.override_action, r.override_note, r.override_by, r.override_at,
                  (SELECT v.display_name FROM app.v_party v WHERE v.entity_code = r.entity_code AND v.partner_code = r.partner_code LIMIT 1) AS partner_name,
                  count(*) OVER ()::int AS matched
@@ -107,16 +112,18 @@ export function checklistQuery(s: ChecklistSpec): { sql: string; countsSql: stri
 }
 
 /** Gaps matrix for a fund-level rule: entity x period cells with counts by result. */
-export function gapsQuery(rule: string, entity: string | null): { sql: string; params: unknown[] } {
+export function gapsQuery(rule: string, entity: string | null, cadence: string | null = null): { sql: string; params: unknown[] } {
   if (!RULE_IDS.includes(rule)) throw new SpecError("rule");
   if (entity && !ENT.test(entity)) throw new SpecError("entity");
+  if (cadence && !(CADENCES as readonly string[]).includes(cadence)) throw new SpecError("cadence");
   const params: unknown[] = [rule];
   const ent = entity ? (params.push(entity), ` AND entity_code = $${params.length}`) : "";
+  const cad = cadence ? (params.push(cadence), ` AND cadence = $${params.length}`) : "";
   return {
     params,
-    sql: `SELECT entity_code, fiscal_year, fiscal_quarter, result, count(*)::int AS n
-          FROM app.v_requirement WHERE rule_id = $1${ent}
-          GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3`,
+    sql: `SELECT entity_code, cadence, fiscal_year, fiscal_quarter, result, count(*)::int AS n
+          FROM app.v_requirement WHERE rule_id = $1${ent}${cad}
+          GROUP BY 1, 2, 3, 4, 5 ORDER BY 1, 3, 4`,
   };
 }
 
@@ -126,7 +133,7 @@ export function checklistPref(x: unknown): Record<string, unknown> | null {
   const o = (x ?? {}) as Record<string, unknown>;
   try {
     const u = new URLSearchParams();
-    for (const k of ["rule", "entity", "fy", "q", "sort", "dir", "pageSize"]) if (o[k] != null && o[k] !== "") u.set(k, String(o[k]));
+    for (const k of ["rule", "entity", "fy", "q", "cadence", "sort", "dir", "pageSize"]) if (o[k] != null && o[k] !== "") u.set(k, String(o[k]));
     if (Array.isArray(o.results)) u.set("result", (o.results as unknown[]).map(String).join(","));
     const s = parseChecklistSpec(u);
     const widths: Record<string, number> = {};
@@ -135,7 +142,7 @@ export function checklistPref(x: unknown): Record<string, unknown> | null {
       if (CHECKLIST_COLUMNS.includes(k) && Number.isFinite(n)) widths[k] = Math.max(60, Math.min(900, n));
     }
     const tab = o.tab === "gaps" ? "gaps" : "rows";
-    return { rule: s.rule, entity: s.entity, fy: s.fy, q: s.q, results: s.results, sort: s.sort.col, dir: s.sort.dir, pageSize: s.pageSize, widths, tab };
+    return { rule: s.rule, entity: s.entity, fy: s.fy, q: s.q, cadence: s.cadence, results: s.results, sort: s.sort.col, dir: s.sort.dir, pageSize: s.pageSize, widths, tab };
   } catch { return null; }
 }
 

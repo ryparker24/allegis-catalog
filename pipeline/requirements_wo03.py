@@ -10,6 +10,9 @@ ops.requirement_applicability):
   entity_fy               AUDITED-FS                        rule's first FY .. last complete FY
   entity_partner_fy       K1-SET                            roster rows x FY
   entity_partner_quarter  PCAP-Q                            roster rows x quarter, rule's first FY .. last complete quarter
+CAT-WO-13 (R-058): a rule whose entity_filter has "cadence" keeps only the periods each entity's cadence expects
+(ops.requirement_cadence): quarterly = quarters >= first_period (yyyyq); annual = Q4 only from first_period's year;
+none = no rows. An entity with no cadence row = annual from the rule's first FY.
 An entity of the rule's type with no Datum roster gets one "no roster in Datum" row per period (never an empty Met);
 an entity whose conditional applicability is not answered gets "applicability not set" (never Missing).
 
@@ -51,6 +54,20 @@ def periods(subject_type, first_fy, today):
         out.append((y, q))
         y, q = (y, q + 1) if q < 4 else (y + 1, 1)
     return out
+
+
+def cadence_keep(cad, fy, q, period_from=None):
+    """CAT-WO-13: does a period belong to an entity's cadence? cad = (cadence, first_period yyyyq | None) or None
+    (no row: annual from the rule's first FY). fy / q None = a period-less subject (always kept unless 'none')."""
+    cadence, first = cad if cad else ("annual", (period_from * 10 + 4) if period_from else None)
+    if cadence == "none":
+        return False
+    if fy is None:
+        return True
+    if cadence == "quarterly":
+        return first is None or (fy * 10 + (q or 4)) >= first
+    # annual: the year-end only (Q4 for a quarterly subject), from first_period's year
+    return (q is None or q == 4) and (first is None or fy >= first // 10)
 
 
 def req_key(rule_id, entity, partner, fy, q):
@@ -193,11 +210,18 @@ def load(cur):
     cur.execute("""SELECT entity_code, min(extract(year FROM commitment_date))::int FROM ref.party
                    WHERE entity_code IS NOT NULL AND commitment_date IS NOT NULL GROUP BY 1""")
     party_first = dict(cur.fetchall())
-    return rules, sk, app, party, etype, dparty, wrong, overrides, docs, party_first, dpage
+    cadence = collections.defaultdict(dict)                 # CAT-WO-13: {rule_id: {entity: (cadence, first_period)}}
+    cur.execute("SELECT to_regclass('ops.requirement_cadence') IS NOT NULL")
+    if cur.fetchone()[0]:
+        cur.execute("SELECT rule_id, entity_code, cadence, first_period FROM ops.requirement_cadence")
+        for rid, e, c, fp in cur.fetchall():
+            cadence[rid][e] = (c, fp)
+    return rules, sk, app, party, etype, dparty, wrong, overrides, docs, party_first, dpage, cadence
 
 
-def subjects(rule, app, party, etype, today, first_fy=None):
-    """-> [(entity, partner|None, fy, q, preset_result|None)]. first_fy: {entity: first year}; no period before it."""
+def subjects(rule, app, party, etype, today, first_fy=None, cadence=None):
+    """-> [(entity, partner|None, fy, q, preset_result|None)]. first_fy: {entity: first year}; no period before it.
+    cadence: {entity: (cadence, first_period)} for the rule (CAT-WO-13), used when entity_filter has "cadence"."""
     first_fy = first_fy or {}
     def started(e, fy):
         return fy is None or e not in first_fy or fy >= first_fy[e]
@@ -262,6 +286,9 @@ def subjects(rule, app, party, etype, today, first_fy=None):
             if t in rtypes and e not in roster_ckind:
                 for fy, q in pers:
                     out.append((e, None, fy, q, "no_roster"))
+    if ef.get("cadence"):                     # CAT-WO-13: only the periods each entity's cadence expects
+        cad = cadence or {}
+        out = [x for x in out if cadence_keep(cad.get(x[0]), x[2], x[3], rule["period_from"])]
     seen, uniq = set(), []                    # one row per key (two relationships of one partner -> one requirement)
     for x in out:
         k = (x[0], x[1], x[2], x[3])
@@ -271,7 +298,7 @@ def subjects(rule, app, party, etype, today, first_fy=None):
 
 
 def build(cur, today, log=print):
-    rules, sk, app, party, etype, dparty, wrong, overrides, docs, first_fy, dpage = load(cur)
+    rules, sk, app, party, etype, dparty, wrong, overrides, docs, first_fy, dpage, cadence = load(cur)
     by_entity = collections.defaultdict(list)
     for d in docs:
         if d["document_id"] in wrong:
@@ -291,7 +318,7 @@ def build(cur, today, log=print):
         cand_kinds = sat_kinds | {k for k, role in sk.get(rule["subtype_code"] or "", {}).items() if role == "candidate"}
         sw = rule["satisfied_when"] or {}
         no_cand = "none_found" if sw.get("no_candidate_result") == "none_found" else "missing"
-        for e, p, fy, q, preset in subjects(rule, app, party, etype, today, first_fy):
+        for e, p, fy, q, preset in subjects(rule, app, party, etype, today, first_fy, cadence.get(rule["rule_id"], {})):
             key = req_key(rule["rule_id"], e, p, fy, q)
             base = dict(req_key=key, rule_id=rule["rule_id"], rule_version=rule["version"], checklist=rule["checklist"],
                         subtype_code=rule["subtype_code"], subject_type=rule["subject_type"], entity_code=e, partner_code=p,

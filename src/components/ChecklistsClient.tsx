@@ -13,13 +13,14 @@ type Req = {
   fiscal_quarter: number | null; result: string; sub_status: string | null; urgency: number; best: Doc; best_kind: string | null; best_stage: string | null;
   best_status: string | null; best_date: string | null; best_reason: string | null; best_source: string | null; n_candidates: number;
   best_page?: number | null;   // CAT-WO-06: the statement's page inside a PCAP package / K-1 bundle
+  cadence?: string | null;     // CAT-WO-13: the entity's cadence for this rule (PCAP-Q), null when the rule has none
   override_action: string | null; override_note: string | null; override_by: string | null; override_at: string | null;
 };
 type Rule = { id: string; checklist: string; title: string; subtype: string | null; subject: string };
-type Resp = { rules: Rule[]; entities: string[]; years: number[]; quarters: boolean; counts: Record<string, number>; matched: number; rows: Req[]; canWrite: boolean };
+type Resp = { rules: Rule[]; entities: string[]; cadences?: Record<string, string>; years: number[]; quarters: boolean; counts: Record<string, number>; matched: number; rows: Req[]; canWrite: boolean };
 type Cand = { page?: number | null; kind: string; stage: string | null; status: string | null; date: string | null; satisfying: boolean; partner_conf: string | null; is_primary: boolean; doc: Doc; location?: string | null; location_folder_id?: string | null; other_locations?: number | null };
-type State = { rule: string; entity: string | null; fy: number | null; q: number | null; results: string[]; sort: string; dir: "asc" | "desc"; pageSize: number; widths: Record<string, number>; tab: "rows" | "gaps" };
-const DEFAULT: State = { rule: "LP-SUB", entity: null, fy: null, q: null, results: [], sort: "urgency", dir: "asc", pageSize: 25, widths: {}, tab: "rows" };
+type State = { rule: string; entity: string | null; fy: number | null; q: number | null; cadence: string | null; results: string[]; sort: string; dir: "asc" | "desc"; pageSize: number; widths: Record<string, number>; tab: "rows" | "gaps" };
+const DEFAULT: State = { rule: "LP-SUB", entity: null, fy: null, q: null, cadence: null, results: [], sort: "urgency", dir: "asc", pageSize: 25, widths: {}, tab: "rows" };
 
 export const RESULT: Record<string, { label: string; cls: string; dot: string }> = {
   met: { label: "Met", cls: "res-met", dot: "🟢" },
@@ -45,6 +46,11 @@ const COLS = [
   { key: "candidates", label: "Other candidates", width: 140, sort: "candidates" },
 ];
 const FUND_LEVEL = new Set(["AUDITED-FS", "K1-SET", "PCAP-Q"]);
+/** CAT-WO-13 (R-058): PCAP cadence per entity */
+export const CADENCE: Record<string, string> = { quarterly: "Quarterly", annual: "Annual (Q4)", none: "None" };
+export function cadenceTag(c: string | null | undefined) {
+  return c ? <span className={`muted small cadence cad-${c}`} title="PCAP cadence (R-058)"> · {CADENCE[c] ?? c}</span> : null;
+}
 
 export function period(r: { fiscal_year: number | null; fiscal_quarter: number | null }) {
   return r.fiscal_year ? (r.fiscal_quarter ? `${r.fiscal_year} Q${r.fiscal_quarter}` : `FY${r.fiscal_year}`) : "";
@@ -95,13 +101,14 @@ export function ChecklistsClient() {
       setSt(s); setReady(true);
     })();
   }, []);
-  const loadKey = JSON.stringify({ r: st.rule, e: st.entity, f: st.fy, q: st.q, rs: st.results, s: st.sort, d: st.dir, p: st.pageSize, page });
+  const loadKey = JSON.stringify({ r: st.rule, e: st.entity, f: st.fy, q: st.q, c: st.cadence, rs: st.results, s: st.sort, d: st.dir, p: st.pageSize, page });
   const load = useCallback(async () => {
     const id = ++reqId.current;
     const u = new URLSearchParams({ rule: st.rule, sort: st.sort, dir: st.dir, pageSize: String(st.pageSize), page: String(page) });
     if (st.entity) u.set("entity", st.entity);
     if (st.fy) u.set("fy", String(st.fy));
     if (st.q) u.set("q", String(st.q));
+    if (st.cadence) u.set("cadence", st.cadence);
     if (st.results.length) u.set("result", st.results.join(","));
     try {
       const r = await api<Resp>(`/api/checklists?${u}`);
@@ -150,20 +157,24 @@ export function ChecklistsClient() {
         <div className="seg" role="tablist" aria-label="Checklist">
           {[["lp_subscriptions", "LP subscriptions"], ["fund_level", "Fund-level set"]].map(([k, l]) => (
             <button key={k} role="tab" aria-selected={checklist === k} className={checklist === k ? "on" : ""}
-              onClick={() => upd({ rule: k === "fund_level" ? "AUDITED-FS" : "LP-SUB", fy: null, q: null, results: [], tab: k === "fund_level" ? st.tab : "rows" })}>{l}</button>
+              onClick={() => upd({ rule: k === "fund_level" ? "AUDITED-FS" : "LP-SUB", fy: null, q: null, cadence: null, results: [], tab: k === "fund_level" ? st.tab : "rows" })}>{l}</button>
           ))}
         </div>
         <div className="seg" aria-label="Requirement">
           {(data?.rules ?? []).filter((r) => r.checklist === checklist).map((r) => (
-            <button key={r.id} className={st.rule === r.id ? "on" : ""} onClick={() => upd({ rule: r.id, fy: null, q: null, results: [] })} title={r.subtype ? `Datum ${r.subtype}` : "catalog-only (no Datum subtype)"}>{r.title}</button>
+            <button key={r.id} className={st.rule === r.id ? "on" : ""} onClick={() => upd({ rule: r.id, fy: null, q: null, cadence: null, results: [] })} title={r.subtype ? `Datum ${r.subtype}` : "catalog-only (no Datum subtype)"}>{r.title}</button>
           ))}
         </div>
         <label className="cap">Scope
           <select className="input" value={st.entity ?? ""} onChange={(e) => upd({ entity: e.target.value || null })}>
             <option value="">All entities</option>
-            {(data?.entities ?? []).map((e) => <option key={e} value={e}>{e}</option>)}
+            {(data?.entities ?? []).map((e) => <option key={e} value={e}>{e}{data?.cadences?.[e] ? ` · ${CADENCE[data.cadences[e]] ?? data.cadences[e]}` : ""}</option>)}
           </select>
         </label>
+        {Object.keys(data?.cadences ?? {}).length ? <label className="cap">Cadence
+          <select className="input" value={st.cadence ?? ""} onChange={(e) => upd({ cadence: e.target.value || null })}>
+            <option value="">All</option>{Object.keys(CADENCE).map((c) => <option key={c} value={c}>{CADENCE[c]}</option>)}
+          </select></label> : null}
         {data?.years.length ? <label className="cap">Fiscal year
           <select className="input" value={st.fy ?? ""} onChange={(e) => upd({ fy: e.target.value ? Number(e.target.value) : null })}>
             <option value="">All</option>{data.years.map((y) => <option key={y} value={y}>{y}</option>)}
@@ -193,7 +204,7 @@ export function ChecklistsClient() {
       </div>
       {err ? <div className="status error" role="alert">Could not load the checklist: {err}.</div> : null}
       {st.tab === "gaps" && FUND_LEVEL.has(st.rule)
-        ? <Gaps rule={st.rule} entity={st.entity} onCell={(e, fy, q) => { upd({ entity: e, fy, q, results: [] }); setSt((s) => ({ ...s, tab: "rows" })); }} />
+        ? <Gaps rule={st.rule} entity={st.entity} cadence={st.cadence} onCell={(e, fy, q) => { upd({ entity: e, fy, q, results: [] }); setSt((s) => ({ ...s, tab: "rows" })); }} />
         : (
           <div className={open ? "find with-panel" : "find"}>
             <section className="card list-card" aria-label="Requirements">
@@ -220,7 +231,7 @@ export function ChecklistsClient() {
                     {(data?.rows ?? []).map((r) => (
                       <tr key={r.req_key} className={open?.req_key === r.req_key ? "sel" : ""} tabIndex={0} onClick={() => setOpen(r)}
                         onKeyDown={(e) => { if (e.key === "Enter") setOpen(r); }}>
-                        <td className="name" title={requirementLabel(r)}>{requirementLabel(r)}</td>
+                        <td className="name" title={requirementLabel(r) + (r.cadence ? ` · ${CADENCE[r.cadence] ?? r.cadence}` : "")}>{requirementLabel(r)}{cadenceTag(r.cadence)}</td>
                         <td><span className={`res ${RESULT[r.result]?.cls ?? ""}`}>{RESULT[r.result]?.dot} {RESULT[r.result]?.label ?? r.result}</span>{r.sub_status ? <div className="muted small">{SUB[r.sub_status] ?? r.sub_status}</div> : null}</td>
                         <td className="name">{docCell(r.best)}{pageTag(r.best, r.best_page)}</td>
                         <td>{r.best_kind ? display("kind", r.best_kind) : ""}</td>
@@ -339,18 +350,19 @@ function RowPanel({ r, rule, onClose, onChanged }: { r: Req; rule?: Rule; onClos
 }
 
 /** Gaps tab: entity x period for a fund-level checklist. A cell is green when all met, red when anything is missing. */
-function Gaps({ rule, entity, onCell }: { rule: string; entity: string | null; onCell: (e: string, fy: number | null, q: number | null) => void }) {
-  const [cells, setCells] = useState<{ entity_code: string; fiscal_year: number | null; fiscal_quarter: number | null; result: string; n: number }[] | null>(null);
+function Gaps({ rule, entity, cadence, onCell }: { rule: string; entity: string | null; cadence: string | null; onCell: (e: string, fy: number | null, q: number | null) => void }) {
+  const [cells, setCells] = useState<{ entity_code: string; cadence?: string | null; fiscal_year: number | null; fiscal_quarter: number | null; result: string; n: number }[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     setCells(null);
-    api<{ cells: typeof cells }>(`/api/checklists/gaps?rule=${encodeURIComponent(rule)}${entity ? `&entity=${encodeURIComponent(entity)}` : ""}`).then((r) => setCells(r.cells)).catch((e) => setErr((e as Error).message));
-  }, [rule, entity]);
+    api<{ cells: typeof cells }>(`/api/checklists/gaps?rule=${encodeURIComponent(rule)}${entity ? `&entity=${encodeURIComponent(entity)}` : ""}${cadence ? `&cadence=${encodeURIComponent(cadence)}` : ""}`).then((r) => setCells(r.cells)).catch((e) => setErr((e as Error).message));
+  }, [rule, entity, cadence]);
   if (err) return <div className="status error">Could not load the gaps: {err}</div>;
   if (!cells) return <p className="muted">Loading…</p>;
   const pk = (c: { fiscal_year: number | null; fiscal_quarter: number | null }) => `${c.fiscal_year ?? ""}|${c.fiscal_quarter ?? ""}`;
   const periods = [...new Map(cells.map((c) => [pk(c), c])).values()].sort((a, b) => (a.fiscal_year ?? 0) - (b.fiscal_year ?? 0) || (a.fiscal_quarter ?? 0) - (b.fiscal_quarter ?? 0));
   const ents = [...new Set(cells.map((c) => c.entity_code))].sort();
+  const cadOf = new Map(cells.map((c) => [c.entity_code, c.cadence ?? null]));
   const at = (e: string, p: string) => cells.filter((c) => c.entity_code === e && pk(c) === p);
   const tone = (cs: typeof cells) => {
     const n = (r: string) => cs.filter((c) => c.result === r).reduce((a, c) => a + c.n, 0);
@@ -367,7 +379,7 @@ function Gaps({ rule, entity, onCell }: { rule: string; entity: string | null; o
         <table className="grid gaps">
           <thead><tr><th>Entity</th>{periods.map((p) => <th key={pk(p)}>{period(p)}</th>)}</tr></thead>
           <tbody>{ents.map((e) => (
-            <tr key={e}><td className="name">{e}</td>
+            <tr key={e}><td className="name">{e}{cadenceTag(cadOf.get(e))}</td>
               {periods.map((p) => { const t = tone(at(e, pk(p))); return (
                 <td key={pk(p)} className={`gap ${t.cls}`}>{t.text ? <button className="link" onClick={() => onCell(e, p.fiscal_year, p.fiscal_quarter)}>{t.text}</button> : null}</td>
               ); })}
