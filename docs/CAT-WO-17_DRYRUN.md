@@ -53,5 +53,37 @@ Find yet (CAT-WO-14 adds the portal folders). Review queue unchanged (it does no
 
 ## Zips (R-062)
 
-Pending Ryan's OK to download (asked 2026-11-25). In scope: Finance 729 zips, Confidential 959 (non-empty, not Secret);
-none over the 1.5 GB cap (largest 904 MB).
+Ryan's OK 2026-11-25 16:43 UTC ("Yes to Both": Finance and Confidential). Listed in memory with drive.readonly, net guard on,
+nothing on disk or Drive; 4 workers, 21 min, 9.1 GB. Written to `cat.zip_listing` / `cat.zip_member` on the throwaway only.
+
+| | Finance | Confidential |
+|---|---:|---:|
+| Zips | 729 | 959 |
+| Files inside (incl. one nested level) | 13,442 | 35,476 |
+| Also on Drive (same md5 as a catalog file) | 9,537 | 8,478 |
+| **Only inside a zip** | **3,767** | **26,582** |
+| Not hashed (password-protected or too big) | 138 | 416 |
+
+All zips: 1,596 listed, 80 password-protected (names only), 2 not real zips, 0 failed, 0 over the cap.
+
+Only inside a zip, by folder:
+
+| Folder | Files | Zips | PDF | Excel/CSV | Word | Images |
+|---|---:|---:|---:|---:|---:|---:|
+| Conf › Entire Revver Contents 11-12-2026 | 26,582 | 403 | 2,590 | 747 | 184 | 16,533 |
+| Finance › 07-Taxes | 1,943 | 145 | 1,287 | 635 | 0 | 0 |
+| Finance › 14-Systems and GL | 1,649 | 117 | 0 | 30 | 0 | 0 |
+| Finance › 06-Vendors | 97 | 5 | 91 | 4 | 0 | 0 |
+| Finance › 02-Legal | 55 | 10 | 55 | 0 | 0 | 0 |
+| Finance › 04-Mgmt Co | 18 | 4 | 8 | 1 | 0 | 0 |
+| Finance › other | 5 | 4 | | | | |
+
+(14-Systems and GL: mostly QuickBooks backup parts, not documents.)
+
+### CIP-II 2025 investor K-1s
+
+Yes, they are in a zip: `07-Taxes/2025/01_Partner Packages/Zipped Files/Cyber Innovation Partners II, LP_TY25 Investor
+Package.zip`, 117 files, all K-1-named. **All 117 are also on Drive as loose files** in `07-Taxes/2025/01_Partner Packages/CIP-II`,
+where the catalog already has them as kind k1 (main). Nothing about them is only inside the zip. Same folder also holds
+CIP II Administrative TY25 (4, all loose too) and the CIP-II 1042-S packages (17 + 2 files only inside zips: the amended
+1042-S and one final 1042-S set).
