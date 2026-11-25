@@ -27,7 +27,7 @@ export async function POST(req: Request) {
     ids = r.ids;
   }
   // Excel: refuse (413) rather than build a sheet that could exhaust Worker memory; CSV streams fine up to 50k
-  const q = exportQuery(spec, { nameIds: ids }, format === "xlsx" ? XLSX_LIMIT + 1 : EXPORT_LIMIT);
+  const q = exportQuery(spec, { nameIds: ids, hideCopies: true }, format === "xlsx" ? XLSX_LIMIT + 1 : EXPORT_LIMIT);
   const rows = await db(env).rows(q.sql, q.params);
   if (format === "xlsx" && rows.length > XLSX_LIMIT) {
     return json({ error: "too_many_rows_for_excel", limit: XLSX_LIMIT, hint: "Narrow the filters or use Download CSV." }, 413);

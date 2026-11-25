@@ -3,6 +3,7 @@ import { previewUrl, show, type Row } from "./client";
 import { maskNames, shownName } from "./bus";
 import { Icon } from "./icons";
 import { AllLocations } from "./Location";
+import { isZipName, ZipContents } from "./ZipContents";
 
 /** Drive's own preview in an iframe (Google enforces access inside it) + "Open in Drive". */
 export function SidePanel({ row, onClose, children }: { row: Row; onClose: () => void; children?: React.ReactNode }) {
@@ -36,6 +37,7 @@ export function SidePanel({ row, onClose, children }: { row: Row; onClose: () =>
           <div><dt>catalog id</dt><dd><code>{row.document_id ?? ""}</code></dd></div>
         </dl>
         <AllLocations fileId={row.file_id} />
+        {isZipName(row.name) ? <ZipContents fileId={row.file_id} /> : null}
         {children}
       </div>
     </aside>

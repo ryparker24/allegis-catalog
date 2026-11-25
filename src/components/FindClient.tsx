@@ -555,6 +555,9 @@ export function FindClient() {
               <div className="field">
                 <span className="cap">Primary copy</span>
                 <FlagInput value={spec.filters.is_primary ?? (spec.filters.primary_only ? "yes" : undefined)} onChange={(x) => setFilter("is_primary", x)} />
+                <label className="row small" title="Each document shows once, at its primary copy. Other copies are listed under Locations in the side panel (R-061).">
+                  <input type="checkbox" checked={spec.filters.show_copies === true} onChange={(e) => setFilter("show_copies", e.target.checked || undefined)} /> Show copies
+                </label>
               </div>
               <div className="field">
                 <span className="cap">Versions</span>

@@ -52,6 +52,8 @@ export interface FindSpec {
     /** CAT-WO-04 R-029: only current versions (drops superseded / redline / draft-of members of applied families).
      *  Off by default; turned on by default once Ryan has reviewed a sample of families. */
     current_only?: boolean;
+    /** CAT-WO-17 R-061: copies of a document are hidden in Find unless this is on */
+    show_copies?: boolean;
   };
   search?: string;
   sort?: { col: string; dir: "asc" | "desc" };
@@ -116,6 +118,13 @@ export interface Built {
 export interface WhereOpts {
   /** file ids whose NAME matches the search, found by a Drive search as the user (names never reach the DB) */
   nameIds?: string[];
+  /** CAT-WO-17 R-061: Find and its export hide copies unless the spec asks for them (the Review queue does not set this) */
+  hideCopies?: boolean;
+}
+
+/** R-061: copies are hidden unless show_copies is on, the Primary copy filter is set, or a File ID / Catalog ID is asked for. */
+export function hidesCopies(f: FindSpec["filters"]): boolean {
+  return f.show_copies !== true && f.is_primary == null && f.primary_only !== true && !f.file_id && !f.document_id;
 }
 
 /** WHERE clause for a spec ($1..$n). */
@@ -183,6 +192,8 @@ export function buildWhere(spec: FindSpec, opts: WhereOpts = {}): Built {
     if (b) parts.push(`${col} < (${p(b)}::date + 1)`);
   }
   if (f.primary_only === true) parts.push("is_primary IS TRUE");
+  if (f.show_copies != null && typeof f.show_copies !== "boolean") throw new SpecError("show_copies: bad value");
+  if (opts.hideCopies && hidesCopies(f)) parts.push("is_primary IS NOT FALSE");
   if (f.current_only === true) parts.push("(version_role IS NULL OR version_role IN ('current', 'amends'))");
   else if (f.current_only != null && f.current_only !== false) throw new SpecError("current_only: bad value");
   if (f.is_primary != null) {
@@ -303,7 +314,7 @@ export function parseLayout(x: unknown): ViewLayout {
 }
 
 const FILTER_KEYS = new Set([
-  ...Object.values(PICK_FILTER_KEY), "fiscal_year", "primary_only", "is_primary", "fy_range", "modified_time", "signed_date", "effective_date", "issued_date", "file_id", "document_id", "location", "current_only", "versions", "published_date", "portal_kind_conflict",
+  ...Object.values(PICK_FILTER_KEY), "fiscal_year", "primary_only", "is_primary", "fy_range", "modified_time", "signed_date", "effective_date", "issued_date", "file_id", "document_id", "location", "current_only", "show_copies", "versions", "published_date", "portal_kind_conflict",
 ]);
 
 export function parseSpec(x: unknown): FindSpec {

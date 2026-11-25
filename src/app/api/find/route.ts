@@ -48,8 +48,8 @@ export async function POST(req: Request) {
   const t0 = Date.now();
   const names = await nameIds(g.session.at, spec);
   if (names.expired) return json({ error: "signin_required", login: "/api/auth/login" }, 401);
-  const q = pageQuery(spec, FIND_VIEW, { nameIds: names.ids });
-  const gq = groupQuery(spec, { nameIds: names.ids });
+  const q = pageQuery(spec, FIND_VIEW, { nameIds: names.ids, hideCopies: true });
+  const gq = groupQuery(spec, { nameIds: names.ids, hideCopies: true });
   const D = db(env);
   const [rows, cnt, groups] = await Promise.all([
     D.rows<DbRow>(q.sql, q.params),

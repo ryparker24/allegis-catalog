@@ -16,6 +16,8 @@ export type Filters = Record<string, unknown> & {
   file_id?: string; document_id?: string;
   /** CAT-WO-04 R-029: off by default */
   current_only?: boolean;
+  /** CAT-WO-17 R-061: copies hidden unless on */
+  show_copies?: boolean;
 };
 export type Spec = { filters: Filters; search?: string; sort: { col: string; dir: "asc" | "desc" }; groupBy: string | null; page: number; pageSize: number };
 export type Layout = { columns: string[]; widths: Record<string, number> };
@@ -32,7 +34,7 @@ export const FILTER_LABEL: Record<string, string> = {
   kind: "Kind", entity: "Entity", portco: "Portco", fiscal_year: "Fiscal year", stage: "Signing stage", tier: "Handling", period: "Period", workstream: "Workstream",
   issuer: "Issuer type", file_type_family: "File type", primary_only: "Primary copy", is_primary: "Primary copy", fy_range: "Fiscal year", modified_time: "Modified",
   signed_date: "Signed date", effective_date: "Effective date", file_id: "File ID", document_id: "Catalog ID",
-  current_only: "Current versions only", version_role: "Version", versions: "Versions",
+  current_only: "Current versions only", show_copies: "Copies", version_role: "Version", versions: "Versions",
   published_channel: "Published to", published_date: "Posted date", portal_kind_conflict: "Portal kind conflict",
 };
 export const VOCAB_OF: Record<string, VocabList | undefined> = { kind: "kind", stage: "stage", tier: "tier", period: "period", workstream: "workstream", issuer: "issuer", version_role: "version_role", published_channel: "published_channel" };
@@ -117,6 +119,7 @@ export function chipsOf(spec: Spec): Chip[] {
     let text: string;
     if (Array.isArray(v)) text = v.map((x) => (VOCAB_OF[k] && x !== "(none)" ? display(VOCAB_OF[k]!, String(x)) : String(x))).join(", ");
     else if (k === "primary_only" || k === "current_only") text = "on";
+    else if (k === "show_copies") text = "shown";
     else if (k === "is_primary") text = v === "yes" ? "yes" : "no";
     else if (typeof v === "object") text = rangeText(v as Range);
     else text = `contains “${String(v)}”`;
