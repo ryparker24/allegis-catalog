@@ -32,6 +32,8 @@ def main():
     ap.add_argument("--no-pages", action="store_true")
     ap.add_argument("--seed", type=int, default=16)
     ap.add_argument("--branch-name", default="catwo16-throwaway")
+    ap.add_argument("--map", help="load ref.bank_account from this csv first (a fresh throwaway)")
+    ap.add_argument("--full-derive", action="store_true", help="run the nightly's derive after migration 016 (a fresh throwaway)")
     a = ap.parse_args()
     if a.release:
         sys.exit("REFUSED: the CAT-WO-16 dry run never runs on main")
@@ -43,6 +45,24 @@ def main():
 
     with psycopg.connect(url, autocommit=True) as mc:
         mc.execute(open(os.path.join(HERE, "..", "db", "migrations", "016_wo16.sql"), encoding="utf-8").read())
+    if a.map:
+        with connect() as con:
+            bw.load_map_csv(con, a.map, log=lg)
+    if a.full_derive:
+        # the nightly's derive (CAT-WO-17 changed ops.build_documents step 1: primaries from preferred folders), pages off;
+        # apply_derive's hook runs BANK-L4 (v1, the active version) as the nightly would
+        os.environ["CATWO06_PAGES"] = "0"; os.environ["CATWO16_PAGES"] = "0"
+        with connect() as con:
+            for fn in ("ops.rebuild_folder_ancestors()", "ops.apply_rules()", "ops.build_documents()", "ops.apply_content_checks()"):
+                t = time.time()
+                with con.cursor() as cur:
+                    cur.execute(f"SELECT * FROM {fn}")
+                    rows = cur.fetchall() if cur.description else []
+                con.commit()
+                lg(f"  {fn}: " + (", ".join(f"{r[0]} {r[1]}" for r in rows if len(r) > 1) or "done") + f" ({time.time() - t:.0f}s)")
+            import apply_derive_wo02
+            t = time.time(); apply_derive_wo02.run(con, apply=True, log=lambda m: None); T["full derive"] = time.time() - t
+            lg("  apply_derive done (incl. BANK-L4 v1 hook)")
     with connect() as con:
         cur = con.cursor()
         cur.execute("DELETE FROM cat.file_signal WHERE rule_id = %s", (bw.RULE_ID,))
@@ -138,7 +158,7 @@ def main():
                    ("Person-set (skipped)", "person"), ("No match", "none")):
         L.append(f"| {lab} | {oc(1, o):,} | {oc(2, o):,} |")
     L.append(f"| Bank statements / wire confirmations in the Content disagrees lane | {lanes[1]:,} | {lanes[2]:,} |")
-    L.append(f"| Labelled bank statements with no entity (3,817 before) | {noent(snaps[1], 'bank_stmt'):,} | {noent(snaps[2], 'bank_stmt'):,} |")
+    L.append(f"| Labelled bank statements with no entity ({noent(base, 'bank_stmt'):,} before) | {noent(snaps[1], 'bank_stmt'):,} | {noent(snaps[2], 'bank_stmt'):,} |")
     L.append(f"| Labelled wire confirmations with no entity ({noent(base, 'wire_confirmation')} before) | {noent(snaps[1], 'wire_confirmation'):,} | {noent(snaps[2], 'wire_confirmation'):,} |")
     L.append(f"| Label writes (labelled files whose Entity would change) | {labels(snaps[1]):,} | {labels(snaps[2]):,} |")
     L += ["", "Where the last 4 was found: v1 " + ", ".join(f"{k} {n:,}" for k, n in sorted(res[1]["by_source"].items()))
