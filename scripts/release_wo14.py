@@ -80,8 +80,17 @@ def main():
                                GROUP BY 1, 2 ORDER BY 1, 2"""):
                 lg(f"  {r[0]:8} {r[1]:12} {r[2]:,}")
     else:
-        import catalog_labels as cl, label_new_wo061 as ln
-        svc = drive_svc()
+        # the label WRITE login (labels_sync.creds, as the nightly `label` step) - not the crawler's read-only one (a first run with
+        # drive_svc() got 403 on every file and wrote nothing)
+        import catalog_labels as cl, label_new_wo061 as ln, pages_wo06 as pw
+        home = os.environ.get("DRIVECATALOG_DIR", r"C:\DriveCatalog")
+        if home not in sys.path: sys.path.insert(0, home)
+        cwd = os.getcwd(); os.chdir(home)
+        import labels_sync as lsync
+        lsync.InstalledAppFlow = pw._NoBrowser
+        from googleapiclient.discovery import build
+        svc = build("drive", "v3", credentials=lsync.creds(), cache_discovery=False)
+        os.chdir(cwd)
         rep, _ = ln.run(connect, svc, cl.Schema(cl.load_schema()), apply=True, log=lg)
         lg(f"LABELS done: " + ", ".join(f"{k} {v}" for k, v in sorted(rep.items()) if not isinstance(v, dict)))
 
