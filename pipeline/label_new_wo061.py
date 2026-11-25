@@ -37,7 +37,7 @@ ORDER BY f.file_id
 
 
 def scope(cur):
-    cur.execute(SCOPE_SQL, (list(APPROVED_DRIVES),))
+    cur.execute(ls.scope_sql(cur, SCOPE_SQL), (list(APPROVED_DRIVES),))
     return [r[0] for r in cur.fetchall()]
 
 

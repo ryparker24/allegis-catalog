@@ -31,7 +31,7 @@ import dbguard_wo03 as dbg
 PARTIES_MAX = 3
 STAFF_EMAIL = re.compile(r"^[a-z0-9._%+-]{1,64}@allegiscapital\.com$")
 CODE_RE = re.compile(r"^(LP|GM|GPM)-[0-9]{2,6}(-[A-Z]{1,4})?$")
-ROSTER_KINDS = ("subscription_agreement", "side_letter", "k1", "capital_statement")
+ROSTER_KINDS = ("subscription_agreement", "side_letter", "k1", "capital_statement", "capital_call_notice")   # CAT-WO-14: + capital calls
 GP_AGREEMENT_KINDS = ("legal_agreement", "operating_agreement", "operating_agreement_amendment")   # GOV-04 / GOV-05, GP entities only
 PERSONNEL_NAME = re.compile(
     r"(?i)\b(offer letter|employment (agreement|contract|letter)|compensation (letter|agreement|plan)|comp letter|bonus letter|"

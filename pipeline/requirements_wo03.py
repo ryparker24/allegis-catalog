@@ -201,10 +201,29 @@ def load(cur):
     if not cur.fetchone()[0]:     # before migration 007
         q = (DOCS_SQL.replace("x.version_role, fm.supersedes, fm.amends", "NULL::text, NULL::bigint, NULL::bigint")
              .replace(" LEFT JOIN cat.doc_family_member fm ON fm.document_id = x.document_id AND x.family_id IS NOT NULL", ""))
+    # CAT-WO-14 (R-059 option B): a Partner Portal / LP Portal copy is a reference copy, never a candidate; the
+    # document still counts through any other copy (its best remaining copy becomes the row's file)
+    import portal_wo14
+    if portal_wo14.option(cur) == "B":
+        q = q.replace("WHERE x.document_id IS NOT NULL", "JOIN cat.file pf ON pf.file_id = x.file_id\n"
+                      "WHERE x.document_id IS NOT NULL AND NOT ops.in_label_scope(pf.drive_name, pf.folder_path, true)")
     cur.execute(q, (kinds + list(AMENDMENT_KINDS),))
     docs = [dict(zip(["document_id", "file_id", "kind", "entities", "issuing", "fy", "period", "stage", "status", "is_primary", "dt",
                       "version_role", "supersedes", "amends"], r))
             for r in cur.fetchall()]
+    # CAT-WO-14: a document's entities are those of ANY of its in-scope copies (a Partner Portal copy in a fund folder knows
+    # the fund; its Finance primary may not). Option B: portal copies are reference copies and add nothing.
+    if portal_wo14.option(cur) is not None:
+        cur.execute("""SELECT x.document_id, array_agg(DISTINCT e) FROM app.v_find_x x CROSS JOIN LATERAL unnest(x.entities) e
+                       JOIN cat.file pf ON pf.file_id = x.file_id
+                       WHERE x.document_id IS NOT NULL AND x.kind = ANY(%s)""" +
+                    (" AND NOT ops.in_label_scope(pf.drive_name, pf.folder_path, true)" if portal_wo14.option(cur) == "B" else "") +
+                    " GROUP BY 1", (kinds + list(AMENDMENT_KINDS),))
+        ents_any = dict(cur.fetchall())
+        for d in docs:
+            extra = ents_any.get(d["document_id"])
+            if extra:
+                d["entities"] = sorted(set(d["entities"] or []) | set(extra))
     # Ryan 2026-11-19: requirement years start at each entity's FIRST year (earliest commitment date in the Datum roster
     # export), never before. An entity with no roster commitment dates keeps the rule's own start year.
     cur.execute("""SELECT entity_code, min(extract(year FROM commitment_date))::int FROM ref.party

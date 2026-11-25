@@ -94,11 +94,20 @@ def handling_mods(raise_, schema):
 
 
 # ------------------------------------------------------------------ DB helpers
+def scope_sql(cur, sql):
+    """CAT-WO-14: the labelling scope is data (ops.label_scope: the approved drives + My Drive subtrees such as the
+    Partner Portal) once migration 014 is in; before it, the approved drives only. `sql` uses f.drive_name = ANY(%s)."""
+    cur.execute("SELECT to_regprocedure('ops.in_label_scope(text,text,boolean)') IS NOT NULL")
+    if cur.fetchone()[0]:
+        return sql.replace("f.drive_name = ANY(%s)", "(f.drive_name = ANY(%s) OR ops.in_label_scope(f.drive_name, f.folder_path))")
+    return sql
+
+
 def scope_ids(cur):
-    """Files the read-back reads: approved drives, live, not secret / noise / shortcut (the labelling scope)."""
-    cur.execute("""SELECT f.file_id FROM cat.file f WHERE f.drive_name = ANY(%s) AND f.removed_run IS NULL
+    """Files the read-back reads: approved drives (+ ops.label_scope subtrees), live, not secret / noise / shortcut."""
+    cur.execute(scope_sql(cur, """SELECT f.file_id FROM cat.file f WHERE f.drive_name = ANY(%s) AND f.removed_run IS NULL
                    AND f.noise_flag IS NOT TRUE AND coalesce(f.handling,'secret') <> 'secret' AND f.is_shortcut IS NOT TRUE
-                   UNION SELECT file_id FROM app.labelled_file ORDER BY 1""", (list(APPROVED_DRIVES),))
+                   UNION SELECT file_id FROM app.labelled_file ORDER BY 1"""), (list(APPROVED_DRIVES),))
     return [r[0] for r in cur.fetchall()]
 
 

@@ -200,6 +200,10 @@ def run(conn, ruled=None, apply=True, log=print):
     if cur.fetchone()[0]:
         import portals_wo05
         portals_wo05.apply_issued(conn, apply=True, log=log)
+    # CAT-WO-14 (R-059): Partner Portal / LP Portal copies - option A: Issued; option B: reference copies. Last, so the
+    # status rules above never undo it.
+    import portal_wo14
+    portal_wo14.apply(conn, apply=True, log=log)
     log(f"APPLIED: audited FS {len(afs_fy):,}, kinds {len(kinds):,}, execution cleared {len(not_exec):,}, issuers {len(issuers):,}, parties {len(parties):,} documents, status {len(status):,}")
     return c
 

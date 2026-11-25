@@ -24,7 +24,7 @@ import argparse, collections, datetime, io, json, os, re, shutil, subprocess, sy
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 EXTRACTOR_VERSION = "cnt-3"
-KINDS = ("k1", "capital_statement", "subscription_agreement", "side_letter")
+KINDS = ("k1", "capital_statement", "subscription_agreement", "side_letter", "capital_call_notice")   # CAT-WO-14: + capital calls
 PDF = "application/pdf"
 GDOC = "application/vnd.google-apps.document"
 WORD_EXCEL = re.compile(r"(msword|wordprocessingml|ms-excel|spreadsheetml|vnd\.google-apps\.spreadsheet|opendocument\.(text|spreadsheet))")
@@ -105,6 +105,16 @@ CNT_RULES = [
      "side letter: a roster name in the address block (lane unless the Dear line agrees)"),
     ("CNT-SL-FUND", "entity", "SL-FUND", {"region": 0.6}, "side letter page 1: the fund's name -> entity code"),
     ("CNT-ALL-TIN", "tin_presence", "TIN", {"rx": TIN_RX}, "R-037: a TIN pattern on page 1 -> Handling Contains Tax ID (presence only)"),
+    # CAT-WO-14: capital call notices (Partner Portal / Capital Calls): the notice's addressee -> partner code
+    ("CNT-CCN-LBL", "partner", "CCN-LBL",
+     {"label": r"(?i)\b(limited\s+partner|partner\s+name|investor\s+name|investor|partner|member|to|attention|attn)\s*[:\-]",
+      "region": 0.45, "certain": True},
+     "capital call notice page 1: a 'Limited Partner:' / 'Investor:' / 'To:' label -> partner code"),
+    ("CNT-CCN-DEAR", "partner", "CCN-DEAR", {"rx": r"(?im)^\s*Dear\s+(.{2,120}?)\s*[:,]\s*$", "certain": True},
+     "capital call notice: the 'Dear ...' line -> partner code"),
+    ("CNT-CCN-TOP", "partner", "CCN-TOP", {"region": 0.45, "certain": False},
+     "capital call notice: a roster name in the address block (never certain -> lane)"),
+    ("CNT-CCN-FUND", "entity", "CCN-FUND", {"region": 0.45}, "capital call notice page 1: the fund's name -> entity code"),
 ]
 RULE_IDS = [r[0] for r in CNT_RULES]
 
@@ -538,7 +548,34 @@ def extract_sl(pages, names, ents, rules):
     return [st]
 
 
-EXTRACT = {"k1": extract_k1, "capital_statement": extract_pcap, "subscription_agreement": extract_sub, "side_letter": extract_sl}
+def extract_ccn(pages, names, ents, rules):
+    """CAT-WO-14: a capital call notice = one partner's notice on page 1 (label, then Dear line, then address block)."""
+    st = Stmt(1, len(pages))
+    p = pages[0] if pages else None
+    if p is None:
+        return [st]
+    found = False
+    r = _use(rules, "CNT-CCN-LBL")
+    if r:
+        for win in label_values(p, r["spec"]["label"], r["spec"].get("region")):
+            if _partner_from(st, win, names, "CNT-CCN-LBL", rules):
+                found = True; break
+    r = _use(rules, "CNT-CCN-DEAR")
+    if not found and r:
+        m = re.search(r["spec"]["rx"], p.text())
+        if m:
+            found = _partner_from(st, [Line(m.group(1), 0, 0, 0, 0)], names, "CNT-CCN-DEAR", rules)
+    r = _use(rules, "CNT-CCN-TOP")
+    if not found and r:
+        _partner_from(st, p.region(r["spec"].get("region", 0.45)), names, "CNT-CCN-TOP", rules)
+    r = _use(rules, "CNT-CCN-FUND")
+    if r:
+        st.entity = ents.match(p.text(r["spec"].get("region", 0.45)))
+    return [st]
+
+
+EXTRACT = {"k1": extract_k1, "capital_statement": extract_pcap, "subscription_agreement": extract_sub, "side_letter": extract_sl,
+           "capital_call_notice": extract_ccn}
 
 
 def tin_present(page, rules):
