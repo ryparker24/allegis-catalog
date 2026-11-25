@@ -35,4 +35,4 @@ Afterwards the Worker and proxy were stopped, ports 8787/8788 confirmed free, `.
 - **CAT-WO-11 note:** `cat-wo-11` must rebase on `2ff3776`. Overlap is `src/components/FindClient.tsx` only if it touched Find.
 
 ## Clean-up
-- Throwaway `catwo12-throwaway` (`br-red-lake-bd8e5417`): delete when Ryan has finished with it (not deleted; needs his say-so).
+- Throwaway `catwo12-throwaway` (`br-red-lake-bd8e5417`) deleted 2026-11-25 01:26 UTC on Ryan's instruction; confirmed gone from the branch list. Nothing left to clean up.
