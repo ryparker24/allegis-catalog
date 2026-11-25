@@ -204,6 +204,9 @@ def run(conn, ruled=None, apply=True, log=print):
     # status rules above never undo it.
     import portal_wo14
     portal_wo14.apply(conn, apply=True, log=log)
+    # CAT-WO-16: BANK-L4 (bank statement entity from the account's last 4) - its signals are re-added after every derive
+    import bank_wo16
+    bank_wo16.nightly_step(conn, log=log)
     log(f"APPLIED: audited FS {len(afs_fy):,}, kinds {len(kinds):,}, execution cleared {len(not_exec):,}, issuers {len(issuers):,}, parties {len(parties):,} documents, status {len(status):,}")
     return c
 
