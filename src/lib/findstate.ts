@@ -125,8 +125,9 @@ export function chipsOf(spec: Spec): Chip[] {
   return out;
 }
 
-/** Page title: the saved view's name (· edited), "Search results" after a header search, else "Find". */
+/** Page title: the saved view's name (· edited); "Search results" when the text term is the only filter (a header search); else "Find". */
 export function titleOf(current: Current | null, edited: boolean, spec: Spec): { name: string; edited: boolean } {
   if (current) return { name: current.name, edited };
-  return { name: term(spec.search) ? "Search results" : "Find", edited: false };
+  const onlyText = !!term(spec.search) && !Object.values(spec.filters).some(isActive);
+  return { name: onlyText ? "Search results" : "Find", edited: false };
 }

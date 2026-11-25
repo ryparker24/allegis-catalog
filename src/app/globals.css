@@ -175,7 +175,7 @@ input[type=checkbox] { accent-color: var(--ink); width: 14px; height: 14px; marg
 .chip button:hover { color: var(--ink); }
 /* CAT-WO-12: the in-window text filter (left of the chips) and the TEXT chip; "· edited" after a saved view's name */
 .textfilter { display: inline-flex; align-items: center; gap: 6px; position: relative; flex: 0 1 300px; min-width: 200px; }
-.textfilter > svg { position: absolute; left: 9px; color: var(--muted); pointer-events: none; }
+.textfilter > svg { position: absolute; left: 9px; width: 14px; height: 14px; color: var(--muted); pointer-events: none; }
 .textfilter .input { width: 100%; padding-left: 30px; padding-right: 26px; height: 30px; font-size: 13px; }
 .textfilter .clear { position: absolute; right: 4px; border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 15px; line-height: 1; padding: 2px 6px; border-radius: 999px; }
 .textfilter .clear:hover { color: var(--ink); }

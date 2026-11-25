@@ -37,6 +37,8 @@ describe("CAT-WO-12 · header search starts fresh", () => {
     const s = headerSearch(opened().spec, "w-9");
     expect(titleOf(null, false, s)).toEqual({ name: "Search results", edited: false });
     expect(titleOf(null, false, EMPTY)).toEqual({ name: "Find", edited: false });
+    // in-window text alongside another filter is not a header search: the title stays Find
+    expect(titleOf(null, false, setText(setFilter(EMPTY, "kind", ["w9"]), "CIP")).name).toBe("Find");
   });
   it("the shell empties the header box, drops the current view and sends other pages to /?q= (a fresh search)", () => {
     const shell = src("components/AppShell.tsx");

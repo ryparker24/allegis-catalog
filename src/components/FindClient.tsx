@@ -241,6 +241,7 @@ export function FindClient() {
     setSpec((s) => headerSearch(s, q));
     setCurrent(null);
     setChecked(new Set());
+    setNote(null);
     setReady(true);
     emit(EV.currentView, { viewId: null });
   };
