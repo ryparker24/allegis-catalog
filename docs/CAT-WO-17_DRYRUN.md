@@ -78,7 +78,7 @@ Only inside a zip, by folder:
 | Finance › 04-Mgmt Co | 18 | 4 | 8 | 1 | 0 | 0 |
 | Finance › other | 5 | 4 | | | | |
 
-(14-Systems and GL: mostly QuickBooks backup parts, not documents.)
+(14-Systems and GL: 1,575 of 1,649 are .xml / .rels export parts, plus 44 .md and 30 .csv; not documents.)
 
 ### CIP-II 2025 investor K-1s
 
