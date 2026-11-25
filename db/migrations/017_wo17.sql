@@ -7,6 +7,18 @@
 BEGIN;
 
 -- ------------------------------------------------------------------ R-060
+CREATE TABLE IF NOT EXISTS ops.dup_folder_pref (
+  folder_prefix text PRIMARY KEY,          -- drive / folder path prefix, as cat.file.folder_path
+  note          text,
+  ruled_by      text NOT NULL,
+  ruled_at      timestamptz NOT NULL DEFAULT now(),
+  active        boolean NOT NULL DEFAULT true
+);
+INSERT INTO ops.dup_folder_pref (folder_prefix, note, ruled_by) VALUES
+  ('LIMITED - Finance/FINANCE TEAM - Allegis Accounting/02-Legal/Organized Entities - 2026-10-21',
+   'main copy over the older CIP, CSOP and GP folders', 'Ryan R-060 2026-11-25')
+ON CONFLICT DO NOTHING;
+
 -- The R-060 keys per live, groupable file. in_scope = Finance shared drive or the Confidential folder.
 CREATE OR REPLACE VIEW ops.v_file_r060 AS
 SELECT f.file_id,
@@ -16,7 +28,13 @@ SELECT f.file_id,
         OR f.folder_path LIKE 'My Drive/Confidential - RYAN and CECILIA only%')                                   AS in_scope,
        EXISTS (SELECT 1 FROM unnest(coalesce(f.path_segments, '{}'::text[])) s
                WHERE s ~* '^z-' OR s ~* '(archive|(^|[^a-z])old([^a-z]|$)|backup|superseded|bisync|_files$)')     AS r060_archive,
-       (f.name ~* '^copy of ' OR f.name ~* '\(\d{1,2}\)(\.[a-z0-9]{1,5})?$' OR f.name ~* ' - copy(\.[a-z0-9]{1,5})?$') AS r060_copyname
+       (f.name ~* '^copy of ' OR f.name ~* '\(\d{1,2}\)(\.[a-z0-9]{1,5})?$' OR f.name ~* ' - copy(\.[a-z0-9]{1,5})?$') AS r060_copyname,
+       -- Ryan 2026-11-25: a preferred folder wins (ops.dup_folder_pref); a year folder outside its range folder
+       -- (e.g. '2011 - 2020/2010') is misfiled and loses
+       EXISTS (SELECT 1 FROM ops.dup_folder_pref p WHERE p.active AND f.folder_path LIKE p.folder_prefix || '%')              AS r060_preferred,
+       EXISTS (SELECT 1 FROM generate_subscripts(coalesce(f.path_segments, '{}'::text[]), 1) i
+               WHERE f.path_segments[i] ~ '^\d{4} - \d{4}$' AND f.path_segments[i + 1] ~ '^\d{4}$'
+                 AND f.path_segments[i + 1]::int NOT BETWEEN substr(f.path_segments[i], 1, 4)::int AND substr(f.path_segments[i], 8, 4)::int) AS r060_misfiled
 FROM cat.file f
 WHERE f.removed_run IS NULL AND NOT f.noise_flag AND f.handling <> 'secret';
 
@@ -28,7 +46,7 @@ DO $$
 DECLARE body text; old_sel text; new_sel text;
 BEGIN
   body := pg_get_functiondef('ops.build_documents()'::regprocedure);
-  IF position('ops.v_file_r060' IN body) > 0 THEN
+  IF position('r060_preferred' IN body) > 0 THEN
     RAISE NOTICE 'build_documents already on R-060'; RETURN;
   END IF;
   old_sel := $o$  SELECT file_id, gk, rn = 1 FROM (
@@ -41,6 +59,7 @@ BEGIN
     SELECT v.file_id, v.gk,
            row_number() OVER (PARTITION BY v.gk
              ORDER BY (v.drive_id IS NOT NULL) DESC, (v.source_system <> 'revver') DESC,
+                      CASE WHEN v.sc THEN v.r060_preferred END DESC NULLS LAST, CASE WHEN v.sc THEN v.r060_misfiled END,
                       CASE WHEN v.sc THEN v.r060_archive END, CASE WHEN v.sc THEN v.r060_copyname END,
                       CASE WHEN v.sc THEN v.created_time END ASC NULLS LAST, CASE WHEN v.sc THEN v.path_depth END ASC NULLS LAST,
                       v.modified_time DESC NULLS LAST, v.file_id) rn

@@ -46,6 +46,28 @@ Finance still always beats Confidential (it already did: shared drive first).
 | 14-Systems and GL/Quickbooks/QB Desktop Enterprise | 06-Vendors/Quickbooks/Quickbooks Desktop Backups - May 2025 | 50 | the backup folder is older |
 | 12-Valuation/2025/Valuation Support - Q3 2025 | Valuation Support - Q2 2025 | 33 | first quarter it was filed in |
 
+## Ryan's vetoes (2026-11-25 17:16 UTC) · re-run
+
+1. **Dropped:** a year folder outside its range folder (`2011 - 2020/2010`) is misfiled and loses (key `r060_misfiled`; 650 files,
+   all in 00-All Reports). Moves from `1996 - 2010/2010` to the misfiled folder: 582 → **0**.
+2. **Dropped:** `02-Legal/Organized Entities - 2026-10-21` is a preferred folder (`ops.dup_folder_pref`, key `r060_preferred`) and
+   wins inside Finance. Groups leaving that folder: 387 → **0** (33 change winner inside it).
+   Note for Ryan: every file in that folder was uploaded on one day (2026-10-22) and 1,606 of its 1,611 documents are also
+   in the Revver copy, so it reads as a bulk export, not a hand clean-up. Where it overlaps the working folders it now wins
+   over them: Subscription Docs 95, LPAs 56, Entity Formation Docs 18, GP Agreements 17. Set the row `active = false` to undo.
+3. **Kept:** 59 KPMG workpaper copies give way to `00-All Reports/2025/2025-Q4`.
+
+Key order now: Finance, non-Revver, preferred folder, not misfiled, not archive, no copy name, oldest created, shallower, file ID.
+
+| After the vetoes | Count |
+|---|---:|
+| Groups whose winner changes | 11,319 (Finance 3,238 · Confidential 8,081) |
+| Titles that change | 1,630 |
+| Kind / execution stage that change | 0 / 0 |
+| Fiscal year that changes | 224 |
+| Find, Finance rows shown with copies hidden | 39,666 of 46,952 (unchanged) |
+
+(The tables above this section are the first run, before the vetoes.)
 ## Find (R-061)
 
 Finance files in Find: 46,952 → **39,666** shown with copies hidden (7,286 copies hidden). Confidential files are not in
