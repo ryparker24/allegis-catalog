@@ -68,6 +68,31 @@ Key order now: Finance, non-Revver, preferred folder, not misfiled, not archive,
 | Find, Finance rows shown with copies hidden | 39,666 of 46,952 (unchanged) |
 
 (The tables above this section are the first run, before the vetoes.)
+## Release rehearsal (2026-11-25, `catwo17-throwaway-r2` = main after CAT-WO-14 / CAT-WO-15) · R-060 v2
+
+The first dry run compared ops.build_documents only. A **full derive** (the nightly's, pages off, + checklists) on a fresh
+copy of main showed more: kinds, K-1 parties, status and the audited-FS year are read from the **primary copy's folder and
+name** (apply_derive_wo02), so the first rule ("oldest created wins") re-kinded files when it moved primaries wholesale.
+
+| Full derive vs main today | v1 (oldest created) | **v2 (released rule)** |
+|---|---:|---:|
+| Find rows whose primary flag flips | 6,906 | **801** |
+| Kind changes | 329 (135 K-1s lose their kind) | **0** |
+| Fiscal year changes | 321 | **51** |
+| Status changes | 705 | **7** |
+| K1-SET Met | 257 → 249 | **257 → 257** |
+| Every other checklist count | | **same as main** |
+
+**R-060 v2:** Finance, non-Revver, preferred folder, not misfiled, not archive, no copy name, then CAT-WO-02's own
+"newest modified", file ID. A primary moves only for a stated reason; "oldest created" and "shallower" are gone.
+Ruling 3 (KPMG workpapers → 00-All Reports/2025/2025-Q4) is a second preferred-folder row.
+
+v2 moves: 613 files become primary, 188 stop being primary. To Organized Entities 21 · to 00-All Reports/2025/2025-Q4 71 ·
+to Partner Portal (from GP Portal `Archive (unused)`) 425 · out of archive-like folders 92 · to the misfiled 2010 folder 0.
+
+**R-061 fix:** 187 documents in Find have their primary on a drive outside Find (164 in LIMITED - Investment Team). Hiding
+every non-primary row would have removed them from Find, so a copy is hidden only when its document's primary is itself in
+Find. Find after release: 48,889 rows, **40,804 shown** with copies hidden (8,085 hidden).
 ## Find (R-061)
 
 Finance files in Find: 46,952 → **39,666** shown with copies hidden (7,286 copies hidden). Confidential files are not in

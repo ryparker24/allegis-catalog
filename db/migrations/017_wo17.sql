@@ -16,7 +16,9 @@ CREATE TABLE IF NOT EXISTS ops.dup_folder_pref (
 );
 INSERT INTO ops.dup_folder_pref (folder_prefix, note, ruled_by) VALUES
   ('LIMITED - Finance/FINANCE TEAM - Allegis Accounting/02-Legal/Organized Entities - 2026-10-21',
-   'main copy over the older CIP, CSOP and GP folders', 'Ryan R-060 2026-11-25')
+   'main copy over the older CIP, CSOP and GP folders', 'Ryan R-060 2026-11-25'),
+  ('LIMITED - Finance/FINANCE TEAM - Allegis Accounting/00-All Reports/2025/2025-Q4',
+   'natural home for the quarter''s files (over the KPMG workpaper copies)', 'Ryan R-060 2026-11-25')
 ON CONFLICT DO NOTHING;
 
 -- The R-060 keys per live, groupable file. in_scope = Finance shared drive or the Confidential folder.
@@ -42,34 +44,31 @@ COMMENT ON VIEW ops.v_file_r060 IS
   'CAT-WO-17 R-060 v1: winner keys for duplicate groups wholly inside LIMITED - Finance + Confidential (Ryan 2026-11-25).';
 
 -- Replace step 1 of ops.build_documents (grouping + primary choice). The rest of the live body is kept as it is.
+-- R-060 v2: the copy-specific keys only DEMOTE or PROMOTE a copy; among equals CAT-WO-02's "newest modified" still decides.
+-- (v1 ranked "oldest created" first; the full-derive rehearsal showed kinds / parties / status follow the primary copy's
+-- folder, so moving primaries wholesale re-kinded 329 files. v2 moves a primary only for a stated reason.)
 DO $$
-DECLARE body text; old_sel text; new_sel text;
+DECLARE body text; new_sel text; n int;
 BEGIN
   body := pg_get_functiondef('ops.build_documents()'::regprocedure);
-  IF position('r060_preferred' IN body) > 0 THEN
-    RAISE NOTICE 'build_documents already on R-060'; RETURN;
+  IF position('R-060 v2' IN body) > 0 THEN
+    RAISE NOTICE 'build_documents already on R-060 v2'; RETURN;
   END IF;
-  old_sel := $o$  SELECT file_id, gk, rn = 1 FROM (
-    SELECT f.file_id, coalesce('md5:'||f.md5, 'file:'||f.file_id) gk,
-           row_number() OVER (PARTITION BY coalesce('md5:'||f.md5, 'file:'||f.file_id)
-             ORDER BY (f.drive_id IS NOT NULL) DESC, (f.source_system <> 'revver') DESC, f.modified_time DESC NULLS LAST, f.file_id) rn
-    FROM cat.file f WHERE f.removed_run IS NULL AND NOT f.noise_flag AND f.handling <> 'secret') x;$o$;
-  new_sel := $n$  SELECT file_id, gk, rn = 1 FROM (
-    -- CAT-WO-17 R-060: groups wholly inside Finance + Confidential get the R-060 keys; every other group keeps CAT-WO-02's
+  new_sel := $n$SELECT file_id, gk, rn = 1 FROM (
+    -- CAT-WO-17 R-060 v2: groups wholly inside Finance + Confidential get the R-060 keys; every other group keeps CAT-WO-02's
     SELECT v.file_id, v.gk,
            row_number() OVER (PARTITION BY v.gk
              ORDER BY (v.drive_id IS NOT NULL) DESC, (v.source_system <> 'revver') DESC,
                       CASE WHEN v.sc THEN v.r060_preferred END DESC NULLS LAST, CASE WHEN v.sc THEN v.r060_misfiled END,
                       CASE WHEN v.sc THEN v.r060_archive END, CASE WHEN v.sc THEN v.r060_copyname END,
-                      CASE WHEN v.sc THEN v.created_time END ASC NULLS LAST, CASE WHEN v.sc THEN v.path_depth END ASC NULLS LAST,
                       v.modified_time DESC NULLS LAST, v.file_id) rn
     FROM (SELECT r.*, bool_and(r.in_scope) OVER (PARTITION BY r.gk) sc FROM ops.v_file_r060 r) v) x;$n$;
-  IF position(old_sel IN body) = 0 THEN
-    RAISE EXCEPTION 'CAT-WO-17: step 1 of ops.build_documents is not the CAT-WO-02 text; not replaced';
+  SELECT count(*) INTO n FROM regexp_matches(body, 'SELECT file_id, gk, rn = 1 FROM \(.*?\) x;', 'g');
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'CAT-WO-17: step 1 of ops.build_documents not found exactly once (%); not replaced', n;
   END IF;
-  EXECUTE replace(body, old_sel, new_sel);
+  EXECUTE regexp_replace(body, 'SELECT file_id, gk, rn = 1 FROM \(.*?\) x;', new_sel);
 END $$;
-
 -- ------------------------------------------------------------------ R-062
 CREATE TABLE IF NOT EXISTS cat.zip_listing (
   zip_file_id   text PRIMARY KEY REFERENCES cat.file(file_id),

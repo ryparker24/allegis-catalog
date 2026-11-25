@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildWhere, exportQuery, hidesCopies, pageQuery, parseSpec, SpecError } from "../src/lib/find";
+import { buildWhere, exportQuery, HIDE_COPIES_SQL, hidesCopies, pageQuery, parseSpec, SpecError } from "../src/lib/find";
 import { chipsOf, EMPTY } from "../src/lib/findstate";
 
 /** CAT-WO-17 (R-061): Find hides copies of a document unless asked. */
 describe("CAT-WO-17 copies hidden in Find", () => {
-  const HIDE = "is_primary IS NOT FALSE";
+  const HIDE = HIDE_COPIES_SQL;
+  it("keeps a copy whose primary is outside Find", () => { expect(HIDE).toContain("document_id NOT IN (SELECT p.document_id FROM app.v_find_x p WHERE p.is_primary"); });
   it("hides copies by default in Find and its export", () => {
     const s = parseSpec({ filters: {} });
     expect(pageQuery(s, undefined, { hideCopies: true }).where).toContain(HIDE);

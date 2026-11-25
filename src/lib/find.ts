@@ -122,6 +122,10 @@ export interface WhereOpts {
   hideCopies?: boolean;
 }
 
+/** R-061: a copy is hidden only when its document's primary copy is itself in Find (187 documents have their primary on a
+ *  drive outside Find; their copies here stay visible). */
+export const HIDE_COPIES_SQL = "(is_primary IS NOT FALSE OR document_id NOT IN (SELECT p.document_id FROM app.v_find_x p WHERE p.is_primary AND p.document_id IS NOT NULL))";
+
 /** R-061: copies are hidden unless show_copies is on, the Primary copy filter is set, or a File ID / Catalog ID is asked for. */
 export function hidesCopies(f: FindSpec["filters"]): boolean {
   return f.show_copies !== true && f.is_primary == null && f.primary_only !== true && !f.file_id && !f.document_id;
@@ -193,7 +197,7 @@ export function buildWhere(spec: FindSpec, opts: WhereOpts = {}): Built {
   }
   if (f.primary_only === true) parts.push("is_primary IS TRUE");
   if (f.show_copies != null && typeof f.show_copies !== "boolean") throw new SpecError("show_copies: bad value");
-  if (opts.hideCopies && hidesCopies(f)) parts.push("is_primary IS NOT FALSE");
+  if (opts.hideCopies && hidesCopies(f)) parts.push(HIDE_COPIES_SQL);
   if (f.current_only === true) parts.push("(version_role IS NULL OR version_role IN ('current', 'amends'))");
   else if (f.current_only != null && f.current_only !== false) throw new SpecError("current_only: bad value");
   if (f.is_primary != null) {
