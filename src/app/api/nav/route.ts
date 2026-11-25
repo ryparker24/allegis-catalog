@@ -10,7 +10,9 @@ export async function GET(req: Request) {
   const g = await requireUser(req, env, { route: "nav" });
   if (!g.ok) return g.response;
   const D = db(env);
-  const r = await D.rows<{ open_total: number }>("SELECT open_total FROM app.v_review_counts");
+  // CAT-WO-15: the badge counts real review only (review_total: without the no-kind / status-unknown backlogs); before
+  // migration 015 the column is missing and the badge falls back to open_total
+  const r = await D.rows<{ open_total: number; review_total?: number | null }>("SELECT to_jsonb(c) ->> 'review_total' AS review_total, open_total FROM app.v_review_counts c");
   // CAT-WO-03.1: the nightly run's health for the shell banner (failed, or no successful run in 36 hours)
   let nightly: { status: string; failed_step: string | null; started_at: string | null; last_ok_at: string | null } | null = null;
   try {
@@ -18,5 +20,5 @@ export async function GET(req: Request) {
       "SELECT status, failed_step, started_at::text, last_ok_at::text FROM app.v_nightly_status");
     nightly = n[0] ?? { status: "never", failed_step: null, started_at: null, last_ok_at: null };
   } catch { nightly = null; }                          // view not there yet: no banner
-  return json({ reviewOpen: Number(r[0]?.open_total ?? 0), nightly });
+  return json({ reviewOpen: Number(r[0]?.review_total ?? r[0]?.open_total ?? 0), nightly });
 }

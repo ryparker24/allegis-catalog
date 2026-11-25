@@ -7,6 +7,8 @@ import { buildWhere, pageSizeOf, parseSpec, SpecError, type FindSpec } from "./f
 
 // display order (R-022: "Status unknown" right after signing stage unknown); the default QUEUE order is queue_rank in the view
 export const LANES = ["stage_unknown", "status_unknown", "low_confidence_executed", "no_kind", "match_subject", "content_disagrees"] as const;
+/** CAT-WO-15: rule-round backlogs - still browsable, never counted in the Review headline or badge (review_total) */
+export const BACKLOG_LANES = ["no_kind", "status_unknown"] as const;
 const SORT: Record<string, string> = {
   queue: "queue_rank, confidence_rank",
   queue_reason: "queue_rank",

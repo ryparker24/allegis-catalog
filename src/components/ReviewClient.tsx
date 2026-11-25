@@ -12,7 +12,7 @@ import { SubjectForm } from "./SubjectForm";
 import { LinkVersionsLane } from "./Versions";
 import { VOCAB, display, type VocabList } from "@/lib/vocab";
 
-type Counts = { content_disagrees?: number; portal_kind_conflict?: number; link_versions?: number; match_subject?: number; stage_unknown?: number; status_unknown?: number; low_confidence_executed?: number; no_kind?: number; open_total?: number; reviewed_today?: number; reviewed_total?: number };
+type Counts = { content_disagrees?: number; portal_kind_conflict?: number; link_versions?: number; match_subject?: number; stage_unknown?: number; status_unknown?: number; low_confidence_executed?: number; no_kind?: number; open_total?: number; reviewed_today?: number; reviewed_total?: number; review_total?: number };
 export type Resp = { counts: Counts; page: number; pageSize?: number; matched?: number; nextPage: number | null; pageRows: number; rows: Row[]; notShown: NotShown; canWrite: boolean };
 
 // lane order as shown (R-022: "Status unknown" right after signing stage unknown)
@@ -44,7 +44,11 @@ export type ReviewListState = {
   pageSize: number;
   widths: Record<string, number>;
 };
-export const DEFAULT_LIST: ReviewListState = { lanes: [], filters: {}, sort: { col: "queue", dir: "asc" }, pageSize: 25, widths: {} };
+// CAT-WO-15: real review = every lane but the two rule-round backlogs (no kind, status unknown); the default list shows it
+export const REVIEW_LANES = ["stage_unknown", "low_confidence_executed", "match_subject", "content_disagrees"];
+export const BACKLOG: Record<string, string> = { no_kind: "No kind", status_unknown: "Status unknown" };
+export const DEFAULT_LIST: ReviewListState = { lanes: REVIEW_LANES, filters: {}, sort: { col: "queue", dir: "asc" }, pageSize: 25, widths: {} };
+const sameLanes = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
 type Col = { key: string; label: string; width: number; sort?: string; filter?: "lane" | "kind" | "entity" | "stage" | "fy" | "location" };
 const COLS: Col[] = [
   { key: "name", label: "File", width: 300 },
@@ -131,7 +135,7 @@ export function ReviewClient() {
     const s = loadSkipped(); setSkipped(s);
     load(s).catch((e) => {
       // a saved state the server no longer accepts must not break every visit: fall back to the defaults once
-      if ((e as { body?: { error?: string } }).body?.error === "bad_spec" && loadKey !== JSON.stringify({ l: [], f: {}, s: DEFAULT_LIST.sort, p: DEFAULT_LIST.pageSize })) setList(DEFAULT_LIST);
+      if ((e as { body?: { error?: string } }).body?.error === "bad_spec" && loadKey !== JSON.stringify({ l: DEFAULT_LIST.lanes, f: {}, s: DEFAULT_LIST.sort, p: DEFAULT_LIST.pageSize })) setList(DEFAULT_LIST);
       else onLoadError(e);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -197,6 +201,7 @@ export function ReviewClient() {
       onNextPage={(p) => load(skipped, p, { back: !!data && p < data.page }).catch(onLoadError)}
       onPrevPage={() => data && load(skipped, prevPage(data.page), { back: true }).catch(onLoadError)}
       list={list} setList={setList} facets={facets} onClearSkipped={clearSkipped} statusPublished={statusPublished}
+      onReload={() => load(skipped, 0).catch(onLoadError)}
       subjectSlot={cur ? <SubjectForm key={`s${cur.file_id}`} row={cur} lane onSaved={() => { load(skipped, data?.page ?? 0).catch(onLoadError); }} /> : null}
       editSlot={cur ? <EditForm key={cur.file_id} row={cur} source="review_edit" onSaved={() => { load(skipped, data?.page ?? 0).catch(onLoadError); }} /> : null} />
   );
@@ -222,6 +227,7 @@ export interface ReviewViewProps {
   list?: ReviewListState; setList?: (u: ReviewListState | ((l: ReviewListState) => ReviewListState)) => void;
   facets?: Record<string, Facet[]> | null; onClearSkipped?: () => void; onPrevPage?: () => void;
   statusPublished?: boolean; editSlot?: ReactNode; subjectSlot?: ReactNode;
+  onReload?: () => void;   // CAT-WO-15: after a bulk Confirm
 }
 
 /** Dashboard-style counter card (Datum): caption, big number, one-line explanation. A lane card filters the list. */
@@ -233,8 +239,35 @@ function Kpi({ cap, n, exp, on, onClick }: { cap: string; n: number; exp: string
 }
 
 /** Presentational part of the Review page (no fetching), so it can be rendered in tests. */
-export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, setCur, setForm, onConfirm, onSkip, onNextPage, list = DEFAULT_LIST, setList, facets, onClearSkipped, onPrevPage, statusPublished = false, editSlot, subjectSlot }: ReviewViewProps) {
+export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, setCur, setForm, onConfirm, onSkip, onNextPage, list = DEFAULT_LIST, setList, facets, onClearSkipped, onPrevPage, statusPublished = false, editSlot, subjectSlot, onReload }: ReviewViewProps) {
   const c = data?.counts ?? {};
+  const toReview = c.review_total ?? c.open_total ?? 0;     // CAT-WO-15: the headline counts real review only
+  // CAT-WO-15: bulk Confirm on Match subject (single roster candidate, no blocking reason), ≤ 500 per action (R-023)
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const bulkSubject = async () => {
+    const spec = JSON.stringify({ filters: list.filters, sort: list.sort, pageSize: list.pageSize });
+    setBulkBusy(true); setBulkMsg(null);
+    try {
+      const pv = await api<{ eligible: number; this_action: number; cap: number }>("/api/review/subject-bulk", { method: "POST", body: JSON.stringify({ spec }) });
+      if (!pv.this_action) { setBulkMsg("No Match subject row with a single roster candidate in this view."); setBulkBusy(false); return; }
+      const ok = window.confirm(`Confirm the single roster candidate as Subject code on ${pv.this_action.toLocaleString()} file${pv.this_action === 1 ? "" : "s"}`
+        + `${pv.eligible > pv.this_action ? ` (of ${pv.eligible.toLocaleString()} that qualify; at most ${pv.cap} per action)` : ""}? `
+        + "Rows with several candidates, a partner of another fund or a conflict are left for you. This writes the Parties label as you.");
+      if (!ok) { setBulkBusy(false); return; }
+      const r = await api<{ report: { done: number; skipped_no_access: number; skipped_check_failed: number; failed: number; events_failed: boolean } }>(
+        "/api/review/subject-bulk", { method: "POST", body: JSON.stringify({ spec, confirm: true }) });
+      const x = r.report;
+      setBulkMsg(`Confirmed ${x.done.toLocaleString()}` + (x.skipped_no_access ? ` · ${x.skipped_no_access} skipped (no access)` : "")
+        + (x.skipped_check_failed ? ` · ${x.skipped_check_failed} skipped (Drive check failed)` : "") + (x.failed ? ` · ${x.failed} failed` : "")
+        + (x.events_failed ? " · NOT all recorded in the catalog: tell the administrator" : ""));
+      onReload?.();
+    } catch (e) {
+      const b = (e as { body?: { error?: string; reason?: string } }).body;
+      setBulkMsg(`Not confirmed: ${b?.reason ?? b?.error ?? (e as Error).message}`);
+    }
+    setBulkBusy(false);
+  };
   const [pop, setPop] = useState<string | null>(null);
   const [versionsLane, setVersionsLane] = useState(false);   // CAT-WO-04: the "Link versions" lane (families, not files)
   const [popAt, setPopAt] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
@@ -319,18 +352,22 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
         </> : null}
       />
       <div className="counters">
-        <Kpi cap="Open" n={c.open_total ?? 0} exp="Files waiting for a person, across all lanes." on={!!setList && !list.lanes.length} onClick={setList ? () => upd({ lanes: [] }) : undefined} />
+        <Kpi cap="To review" n={toReview} exp="Files waiting for a person (the rule-round backlog below is not counted)." on={!!setList && sameLanes(list.lanes, REVIEW_LANES)} onClick={setList ? () => upd({ lanes: REVIEW_LANES }) : undefined} />
         <Kpi cap="Stage unknown" n={c.stage_unknown ?? 0} exp="Signed documents whose signing stage couldn't be read." on={list.lanes.includes("stage_unknown")} onClick={setList ? () => toggleLane("stage_unknown") : undefined} />
-        <Kpi cap="Status unknown" n={c.status_unknown ?? 0} exp="Not a signed document, and no Draft / Final / Issued status found." on={list.lanes.includes("status_unknown")} onClick={setList ? () => toggleLane("status_unknown") : undefined} />
         <Kpi cap="Executed, low confidence" n={c.low_confidence_executed ?? 0} exp="Marked fully executed, but the scan isn't sure." on={list.lanes.includes("low_confidence_executed")} onClick={setList ? () => toggleLane("low_confidence_executed") : undefined} />
         <Kpi cap="Match subject" n={c.match_subject ?? 0} exp="Which roster partner is this document about? (R-026)" on={list.lanes.includes("match_subject")} onClick={setList ? () => toggleLane("match_subject") : undefined} />
         <Kpi cap="Content disagrees" n={c.content_disagrees ?? 0} exp="Page 1 shows a different fiscal year, period or entity than the catalog. Nothing was overwritten: check it." on={list.lanes.includes("content_disagrees")} onClick={setList ? () => toggleLane("content_disagrees") : undefined} />
         <Kpi cap="Link versions" n={c.link_versions ?? 0} exp="Proposed version families: accept, split or pick the current one." on={versionsLane} onClick={setList ? () => setVersionsLane((x) => !x) : undefined} />
         <Kpi cap="Portal kind conflict" n={c.portal_kind_conflict ?? 0} exp="Posted in a portal as one document type, but the catalog's kind differs. The kind is not changed: check it." onClick={() => { window.location.href = "/?portal_conflict=1"; }} />
-        <Kpi cap="No kind" n={c.no_kind ?? 0} exp="The catalog couldn't tell what the document is." on={list.lanes.includes("no_kind")} onClick={setList ? () => toggleLane("no_kind") : undefined} />
         <Kpi cap="Reviewed today" n={c.reviewed_today ?? 0} exp="Confirmed or marked wrong since midnight." />
         <Kpi cap="Skipped" n={skipped.length} exp="Set aside in this browser session; nothing written." />
       </div>
+      <section className="counters backlog" aria-label="Backlog (rule rounds)">
+        <h2 className="cap backlog-cap" style={{ gridColumn: "1 / -1", margin: "8px 0 0" }}>Backlog (rule rounds) <span className="muted small">· left for the next rule rounds; not counted in To review or the sidebar badge</span></h2>
+        <Kpi cap="No kind" n={c.no_kind ?? 0} exp="The catalog couldn't tell what the document is." on={sameLanes(list.lanes, ["no_kind"])} onClick={setList ? () => upd({ lanes: ["no_kind"] }) : undefined} />
+        <Kpi cap="Status unknown" n={c.status_unknown ?? 0} exp="Not a signed document, and no Draft / Final / Issued status found." on={sameLanes(list.lanes, ["status_unknown"])} onClick={setList ? () => upd({ lanes: ["status_unknown"] }) : undefined} />
+        <Kpi cap="All lanes" n={c.open_total ?? 0} exp="Everything open, backlog included." on={!!setList && !list.lanes.length} onClick={setList ? () => upd({ lanes: [] }) : undefined} />
+      </section>
       {loadError ? (
         <div className="status error" role="alert">
           Could not load the review queue: {loadError}. Reload the page to try again; if it keeps failing, sign in again.
@@ -343,6 +380,10 @@ export function ReviewView({ data, cur, skipped, form, busy, msg, loadError, set
             <span className="summary">{nFilters ? `${nFilters} filter${nFilters > 1 ? "s" : ""}` : "No filters"}</span>
             {nFilters && setList ? <button className="link small" onClick={() => upd({ lanes: [], filters: {} })}>Clear all</button> : null}
             <div className="tools">
+              {data?.canWrite && setList && list.lanes.includes("match_subject") ? (
+                <button className="btn" disabled={bulkBusy} onClick={bulkSubject} title="Confirm the single roster candidate on up to 500 Match subject rows in this view">Confirm single matches…</button>
+              ) : null}
+              {bulkMsg ? <span className="small" role="status">{bulkMsg}</span> : null}
               {data?.notShown.total ? (
                 <span className="small warn">
                   {data.notShown.noAccess ? `${data.notShown.noAccess} not shown (no access)` : ""}{data.notShown.noAccess && data.notShown.checkFailed ? " · " : ""}

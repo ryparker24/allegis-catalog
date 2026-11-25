@@ -110,13 +110,13 @@ export function editRecord(e: EditSet): Record<string, EditValue> {
 export interface BulkResult { done: string[]; skippedNoAccess: string[]; failed: { file_id: string; drive_status: number }[] }
 
 /**
- * Writes the same edit on many files: batches of 25 (5 at a time), retry on 429 / 5xx / rate-limit 403 with
+ * Writes the same edit on many files (or a per-file edit: `mods` as a function of the file id, CAT-WO-15): batches of 25 (5 at a time), retry on 429 / 5xx / rate-limit 403 with
  * backoff (as labels_sync.py), a pause between batches. A 403/404 is "no access" (skipped), never retried.
  */
 /** Retry budget for one bulk job: bounds Drive subrequests (≤ 500 writes + 100 retries + 5 access batches + DB). */
 export const BULK_RETRY_BUDGET = 100;
 
-export async function bulkWrite(accessToken: string, ids: string[], mods: unknown[], opts: { fetch?: FetchLike; sleep?: (ms: number) => Promise<void>; batch?: number; parallel?: number; onBatch?: (doneIds: string[]) => Promise<void> } = {}): Promise<BulkResult> {
+export async function bulkWrite(accessToken: string, ids: string[], mods: unknown[] | ((id: string) => unknown[]), opts: { fetch?: FetchLike; sleep?: (ms: number) => Promise<void>; batch?: number; parallel?: number; onBatch?: (doneIds: string[]) => Promise<void> } = {}): Promise<BulkResult> {
   const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const BATCH = opts.batch ?? 25, PAR = opts.parallel ?? 5;
   const out: BulkResult = { done: [], skippedNoAccess: [], failed: [] };
@@ -130,7 +130,7 @@ export async function bulkWrite(accessToken: string, ids: string[], mods: unknow
     const before = out.done.length;
     for (let i = 0; i < chunk.length; i += PAR) {
       await Promise.all(chunk.slice(i, i + PAR).map(async (id) => {
-        const r = await modifyLabels(accessToken, id, mods, opts.fetch).catch(() => ({ status: 0, body: null }));
+        const r = await modifyLabels(accessToken, id, typeof mods === "function" ? mods(id) : mods, opts.fetch).catch(() => ({ status: 0, body: null }));
         if (r.status === 200) { out.done.push(id); return; }
         const reason = String(((r.body?.error as { errors?: { reason?: string }[] } | undefined)?.errors?.[0]?.reason) ?? "").toLowerCase();
         const transient = r.status === 0 || r.status === 429 || r.status >= 500 || (r.status === 403 && /rate|limit/.test(reason));

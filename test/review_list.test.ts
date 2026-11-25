@@ -58,12 +58,13 @@ describe("Review page (Datum look)", () => {
     modified_time: null, file_type_family: "pdf", queue_reason: "status_unknown", signals: null, confidence: null, stage_suggested: null,
     changed: [], catalog: {}, requires_execution: false, ...o,
   });
-  it("Status unknown card and lane come right after Stage unknown", () => {
+  it("CAT-WO-15: the Status unknown card sits in the Backlog (rule rounds) group, after the review lanes", () => {
     const out = renderToStaticMarkup(createElement(ReviewView, { ...base, data: { ...base.data!, counts: { ...base.data!.counts, status_unknown: 26498 } }, list: DEFAULT_LIST, setList: () => {} }));
     expect(out).toContain('class="k-cap">Status unknown<');
     expect(out).toContain('class="k-num">26,498<');
-    expect(out.indexOf("Stage unknown")).toBeLessThan(out.indexOf("Status unknown"));
-    expect(out.indexOf("Status unknown")).toBeLessThan(out.indexOf("Executed, low confidence"));
+    expect(out.indexOf("Stage unknown")).toBeLessThan(out.indexOf("Executed, low confidence"));
+    expect(out.indexOf("Backlog (rule rounds)")).toBeLessThan(out.indexOf('class="k-cap">Status unknown<'));
+    expect(out.indexOf('class="k-cap">Executed, low confidence<')).toBeLessThan(out.indexOf("Backlog (rule rounds)"));
   });
   it("the form shows Status for a non-executable kind (disabled until published) and Stage for an executable one", () => {
     const st = renderToStaticMarkup(createElement(ReviewView, { ...base, cur: row({}), statusPublished: false, editSlot: createElement("div", { id: "edit-slot" }) }));
