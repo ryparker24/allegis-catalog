@@ -43,15 +43,79 @@ def find_codes(text, rx, l4map):
     return out
 
 
-def decide(names, paths, page_codes, person_set, auto_ents, l4map, rx):
+# ---- BANK-L4 v2 (CAT-WO-16 R-068 widenings) ------------------------------------------------------------------------
+# (a) file name: a mapped 4-digit token set off by - _ . or spaces (no cue), unless it sits in a date-shaped run
+# (b) page 1: the last 4 digits of a longer account number after an account cue (Account, Acct, Account Number, A/C)
+_DELIM_TOKEN = re.compile(r"(?<![A-Za-z0-9])([0-9]{4})(?![A-Za-z0-9])")
+_LONG = re.compile(r"(?i)(?<![A-Za-z])(?:account|acct|a/c)\.?\s*(?:number|no\.?|#)?\s*[:#.]?\s*([0-9Xx*][0-9Xx*\- ]{3,24}?[0-9]{4})(?![0-9])")
+
+
+def _is_year(t):
+    return len(t) == 4 and t.isdigit() and 1990 <= int(t) <= 2039
+
+
+def _is_mmdd(t):
+    return len(t) == 4 and t.isdigit() and 1 <= int(t[:2]) <= 12 and 1 <= int(t[2:]) <= 31
+
+
+def date_shaped(stem, start, end):
+    """the 4-digit token at stem[start:end] is part of a date-shaped run (MMDD-YYYY, YYYY-MMDD, MM-DD-YY, MMDD-YY, ...)"""
+    tok = stem[start:end]
+    prev = re.search(r"([0-9]+)[\-_ .]{1,2}$", stem[:start])
+    nxt = re.match(r"[\-_ .]{1,2}([0-9]+)", stem[end:])
+    nb = [m.group(1) for m in (prev, nxt) if m]
+    if _is_year(tok):
+        return True
+    if any(len(x) <= 2 for x in nb):                      # MM-DD-YY pieces around it
+        return True
+    if _is_mmdd(tok) and any(_is_year(x) or len(x) == 2 for x in nb):   # MMDD-YYYY, YYYY-MMDD, MMDD-YY
+        return True
+    return False
+
+
+def delimited_codes(name, l4map, skipped=None):
+    """v2 (a): mapped 4-digit tokens set off by delimiters in a FILE NAME (extension dropped), date-shaped runs skipped."""
+    stem = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", name or "")
+    out = set()
+    for m in _DELIM_TOKEN.finditer(stem):
+        t = m.group(1)
+        if t not in l4map:
+            continue
+        if date_shaped(stem, m.start(1), m.end(1)):
+            if skipped is not None: skipped[t] += 1
+            continue
+        out |= l4map[t]
+    return out
+
+
+def long_number_codes(text, l4map):
+    """v2 (b): (codes from the last 4 of a longer account number after a cue, any account number seen on the page)"""
+    out, seen = set(), False
+    for m in _LONG.finditer(text or ""):
+        digits = re.sub(r"[^0-9]", "", m.group(1))
+        if len(digits) < 4:
+            continue
+        seen = True
+        out |= l4map.get(m.group(1)[-4:], set())
+    return out, seen
+
+
+def name_codes(text, rx, l4map, spec=None):
+    out = find_codes(text, rx, l4map)
+    if (spec or {}).get("name_delimited"):
+        out |= delimited_codes(text, l4map)
+    return out
+
+
+def decide(names, paths, page_codes, person_set, auto_ents, l4map, rx, spec=None):
     """One document. -> (outcome, code|None, source|None).
-    outcome: person | ambiguous | conflict | agrees | set | none."""
+    outcome: person | ambiguous | conflict | agrees | set | none. spec: the rule version's options (v2 widenings)."""
     if person_set:
         return "person", None, None
-    for source, texts in (("name", names), ("path", paths)):
+    for source, texts, fn in (("name", names, lambda t: name_codes(t, rx, l4map, spec)), ("path", paths, lambda t: find_codes(t, rx, l4map))):
         found = set()
         for t in texts:
-            found |= find_codes(t, rx, l4map)
+            found |= fn(t)
         if found:
             break
     else:
@@ -66,10 +130,26 @@ def decide(names, paths, page_codes, person_set, auto_ents, l4map, rx):
     return ("agrees" if code in (auto_ents or ()) else "set"), code, source
 
 
-def unmatched_by_name_path(docs, rx, l4map):
+def unmatched_by_name_path(docs, rx, l4map, spec=None):
     """the documents page 1 is read for: a person has not set the entity and no name / path gives a last 4"""
     return [d for d in docs if not d.get("person")
-            and not any(find_codes(t, rx, l4map) for t in (d.get("names") or []) + (d.get("paths") or []))]
+            and not any(name_codes(t, rx, l4map, spec) for t in (d.get("names") or []))
+            and not any(find_codes(t, rx, l4map) for t in (d.get("paths") or []))]
+
+
+def rule_spec(cur, version=None):
+    """(version, spec dict) of BANK-L4: the given version, else the newest active one; (None, {}) when missing."""
+    if version is None:
+        cur.execute("SELECT version, pattern FROM ops.decomposition_rule WHERE rule_id = %s AND active ORDER BY version DESC LIMIT 1", (RULE_ID,))
+    else:
+        cur.execute("SELECT version, pattern FROM ops.decomposition_rule WHERE rule_id = %s AND version = %s", (RULE_ID, version))
+    r = cur.fetchone()
+    if not r:
+        return None, {}
+    try:
+        return r[0], json.loads(r[1])
+    except (TypeError, ValueError):
+        return r[0], {}
 
 
 # ------------------------------------------------------------------ DB
@@ -140,8 +220,9 @@ def scope(cur):
     return [dict(zip(["document_id", "kind", "person", "files", "names", "paths"], r)) for r in cur.fetchall()]
 
 
-def read_pages(conn, svc, docs, rx, l4map, limit=None, log=print, connect=None):
-    """page 1 of each document not read yet (or changed), in memory; stores codes only in ops.bank_page_read."""
+def read_pages(conn, svc, docs, rx, l4map, limit=None, log=print, connect=None, force=False):
+    """page 1 of each document not read yet (or changed; force = all), in memory; stores codes only in ops.bank_page_read:
+    codes (v1: cue + whole token), codes_v2 (v1 + the last 4 of a longer account number), has_account_number."""
     import pages_wo06 as pw
     cur = conn.cursor()
     cur.execute("SELECT document_id, version_key FROM ops.bank_page_read")
@@ -153,7 +234,7 @@ def read_pages(conn, svc, docs, rx, l4map, limit=None, log=print, connect=None):
                    WHERE fd.document_id = ANY(%s) AND f.removed_run IS NULL AND f.trashed IS NOT TRUE AND f.is_shortcut IS NOT TRUE
                      AND coalesce(f.handling, 'secret') <> 'secret' AND f.noise_flag IS NOT TRUE
                    ORDER BY fd.document_id, (fd.file_role = 'primary') DESC, (f.mime_type = 'application/pdf') DESC, f.file_id""", (ids,))
-    todo = [r for r in cur.fetchall() if done.get(r[0]) != r[4]]
+    todo = [r for r in cur.fetchall() if force or done.get(r[0]) != r[4]]
     conn.commit()
     if limit is not None:
         todo = todo[:limit]
@@ -169,15 +250,15 @@ def read_pages(conn, svc, docs, rx, l4map, limit=None, log=print, connect=None):
                 conn = connect()
             last = time.time()
         if pw.fmt_of(mime) not in ("pdf", "gdoc"):
-            batch.append((did, vk, "skipped_format", None)); c["skipped_format"] += 1; continue
+            batch.append((did, vk, "skipped_format", None, None, None)); c["skipped_format"] += 1; continue
         try:
             data = pw.download(svc, fid, mime, size)
         except Exception:
             data = False
         if data is None:
-            batch.append((did, vk, "too_large", None)); c["too_large"] += 1; continue
+            batch.append((did, vk, "too_large", None, None, None)); c["too_large"] += 1; continue
         if data is False:
-            batch.append((did, vk, "download_error", None)); c["download_error"] += 1; continue
+            batch.append((did, vk, "download_error", None, None, None)); c["download_error"] += 1; continue
         try:
             rd = pw.Reader(data, exe)
             try:
@@ -188,11 +269,14 @@ def read_pages(conn, svc, docs, rx, l4map, limit=None, log=print, connect=None):
             text = None
         del data
         if text is None:
-            batch.append((did, vk, "open_error", None)); c["open_error"] += 1; continue
+            batch.append((did, vk, "open_error", None, None, None)); c["open_error"] += 1; continue
         codes = sorted(find_codes(text, rx, l4map))
+        longc, seen = long_number_codes(text, l4map)
+        codes2 = sorted(set(codes) | longc)
         del text
         oc = "ok" if len(codes) == 1 else "multi" if codes else "no_match"
-        batch.append((did, vk, oc, codes or None)); c[oc] += 1
+        batch.append((did, vk, oc, codes or None, codes2 or None, seen)); c[oc] += 1
+        c["v2:" + ("ok" if len(codes2) == 1 else "multi" if codes2 else "no_match")] += 1
         if len(batch) >= 100 or i == len(todo):
             _write_reads(conn, batch); batch = []
             log(f"  bank page 1: {i:,}/{len(todo):,} read")
@@ -204,34 +288,36 @@ def read_pages(conn, svc, docs, rx, l4map, limit=None, log=print, connect=None):
 
 def _write_reads(conn, rows):
     with conn.cursor() as cur:
-        cur.executemany("""INSERT INTO ops.bank_page_read (document_id, version_key, outcome, codes, read_at) VALUES (%s, %s, %s, %s, now())
+        cur.executemany("""INSERT INTO ops.bank_page_read (document_id, version_key, outcome, codes, codes_v2, has_account_number, read_at)
+                           VALUES (%s, %s, %s, %s, %s, %s, now())
                            ON CONFLICT (document_id) DO UPDATE SET version_key = EXCLUDED.version_key, outcome = EXCLUDED.outcome,
-                             codes = EXCLUDED.codes, read_at = now()""", rows)
+                             codes = EXCLUDED.codes, codes_v2 = EXCLUDED.codes_v2, has_account_number = EXCLUDED.has_account_number,
+                             read_at = now()""", rows)
     conn.commit()
 
 
-def apply(conn, apply=True, log=print):
-    """BANK-L4 over the scope: signals (re-added after every derive) and Content-disagrees entities. Commits when apply."""
+def apply(conn, apply=True, log=print, version=None):
+    """BANK-L4 over the scope: signals (re-added after every derive) and Content-disagrees entities. Commits when apply.
+    version: a given rule version (dry runs compare v1 / v2); default the newest active one."""
     cur = conn.cursor()
     if not available(cur):
         return {}
     l4map = load_map(cur)
     rx = cue_regex(l4map)
-    cur.execute("SELECT version FROM ops.decomposition_rule WHERE rule_id = %s AND active ORDER BY version DESC LIMIT 1", (RULE_ID,))
-    v = cur.fetchone()
-    if v is None or rx is None:
+    version, spec = rule_spec(cur, version)
+    if version is None or rx is None:
         conn.rollback(); log("BANK-L4: rule inactive or map empty - nothing done"); return {}
-    version = v[0]
     docs = scope(cur)
     ids = [d["document_id"] for d in docs]
     cur.execute("DELETE FROM cat.file_signal WHERE rule_id = %s", (RULE_ID,))    # this rule's signals only (re-derived below)
     auto = auto_entities(cur, ids)
-    cur.execute("SELECT document_id, codes FROM ops.bank_page_read WHERE outcome IN ('ok', 'multi')")
+    col = "codes_v2" if spec.get("page_long") else "codes"
+    cur.execute(f"SELECT document_id, {col} FROM ops.bank_page_read WHERE {col} IS NOT NULL")
     pages = {d: set(c or ()) for d, c in cur.fetchall()}
     sig, content, out = [], [], collections.Counter()
     by_ent, by_src = collections.Counter(), collections.Counter()
     for d in docs:
-        oc, code, src = decide(d["names"] or [], d["paths"] or [], pages.get(d["document_id"]), d["person"], auto.get(d["document_id"]), l4map, rx)
+        oc, code, src = decide(d["names"] or [], d["paths"] or [], pages.get(d["document_id"]), d["person"], auto.get(d["document_id"]), l4map, rx, spec)
         out[(d["kind"] or "(no kind)", oc)] += 1
         if src: by_src[src] += 1
         if oc in ("set", "agrees"):
@@ -245,6 +331,11 @@ def apply(conn, apply=True, log=print):
             cp.set_types(["text", "text", "text", "text", "int4", "int4", "text", "int4", "text"])
             for r in sig:
                 cp.write_row(r)
+    # a bank document whose content entity this rule set earlier but no longer finds: cleared (first-page reading never sets
+    # one on these kinds, so a content entity on them is this rule's)
+    cur.execute("""UPDATE cat.doc_content_check c SET content_entity = NULL
+                   WHERE c.document_id = ANY(%s) AND c.content_entity IS NOT NULL AND NOT (c.document_id = ANY(%s))""",
+                (ids, [x[0] for x in content]))
     # the found entity as the document's content entity (the CAT-WO-06 content check compares it with the document's entities:
     # a contradiction -> Content disagrees). content_read_at moves only when the entity changes (a decided lane row stays closed).
     cur.executemany("""INSERT INTO cat.doc_content_check (document_id, file_id, content_entity, content_read_at) VALUES (%s, %s, %s, now())
@@ -262,7 +353,8 @@ def apply(conn, apply=True, log=print):
     log(f"BANK-L4 {'APPLIED' if apply else 'DRY RUN'}: documents {len(docs):,} · signals {len(sig):,} on "
         f"{sum(by_ent.values()):,} documents · conflicts {sum(n for (k, o), n in out.items() if o == 'conflict'):,} · by source "
         + ", ".join(f"{k} {n:,}" for k, n in sorted(by_src.items())))
-    return dict(outcomes=out, by_entity=by_ent, by_source=by_src, documents=len(docs), signals=len(sig))
+    return dict(outcomes=out, by_entity=by_ent, by_source=by_src, documents=len(docs), signals=len(sig), version=version,
+                matched={d: c for d, _, c in content})
 
 
 def nightly_step(conn, log=print, cap=NIGHTLY_CAP):
@@ -279,7 +371,8 @@ def nightly_step(conn, log=print, cap=NIGHTLY_CAP):
             from googleapiclient.discovery import build
             svc = build("drive", "v3", credentials=dc.creds(), cache_discovery=False)
             l4map = load_map(cur); rx = cue_regex(l4map)
-            conn, _ = read_pages(conn, svc, unmatched_by_name_path(scope(cur), rx, l4map), rx, l4map, limit=cap, log=log)
+            _, spec = rule_spec(cur)
+            conn, _ = read_pages(conn, svc, unmatched_by_name_path(scope(cur), rx, l4map, spec), rx, l4map, limit=cap, log=log)
         except (Exception, SystemExit) as e:
             conn.rollback()
             log(f"   bank pages NOT run ({type(e).__name__}); earlier reads stay in use")

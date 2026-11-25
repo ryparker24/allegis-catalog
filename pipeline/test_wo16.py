@@ -34,4 +34,27 @@ check("B13 page 1 is read only for documents without a person entity and with no
       [d["document_id"] for d in b.unmatched_by_name_path([{"document_id": 1, "names": ["x4711"], "paths": []},
                                                            {"document_id": 2, "names": ["stmt"], "paths": ["a/b"]},
                                                            {"document_id": 3, "names": ["stmt"], "paths": [], "person": True}], RX, M)] == [2])
+# ------------------------------------------------------------------ v2 (R-068)
+M2 = {"4711": {"FUND-A"}, "0815": {"FUND-B"}, "1121": {"FUND-C"}, "0285": {"FUND-D"}}
+DC = lambda n: b.delimited_codes(n, M2)
+check("V1 delimited token after letters: 'Bank-4711-.pdf', 'Chk_4711_Jan.pdf', 'Bank 4711 statement.pdf'",
+      DC("Bank-4711-.pdf") == {"FUND-A"} and DC("Chk_4711_Jan.pdf") == {"FUND-A"} and DC("Bank 4711 statement.pdf") == {"FUND-A"})
+check("V2 never inside letters or a longer number: 'ab4711', '47112', '14711'", DC("ab4711.pdf") == set() and DC("x_47112.pdf") == set() and DC("Stmt 14711") == set())
+check("V3 date guard: MMDD-YYYY, YYYY-MMDD, MMDD-YY, MM-DD-YY pieces are skipped",
+      DC("Stmt_1121-2024.pdf") == set() and DC("Stmt 2024-1121.pdf") == set() and DC("Stmt 1121_24.pdf") == set()
+      and DC("Stmt 05-0285-24") == set())
+check("V4 not a date when the neighbour is no year / day piece: 'Chk_1121_Statement.pdf', 'Wells_4711_2024.pdf' (47/11 is no MMDD)",
+      DC("Chk_1121_Statement.pdf") == {"FUND-C"} and DC("Wells_4711_2024.pdf") == {"FUND-A"})
+sk = __import__("collections").Counter(); b.delimited_codes("Stmt 1121-2024", M2, sk)
+check("V5 skipped date-shaped tokens are counted (codes only)", sk["1121"] == 1)
+check("V6 the extension is not a token: 'Bank-4711.0815' keeps only 4711? no: '.0815' is the extension -> dropped",
+      DC("Bank-4711.0815") == {"FUND-A"})
+check("V7 v2 name: two different mapped accounts in one name -> ambiguous",
+      b.decide(["Xfer 4711 to 0815.pdf"], [], None, False, set(), M2, b.cue_regex(M2), {"name_delimited": True})[0] == "ambiguous")
+check("V8 v1 spec ignores the delimited form", b.decide(["Bank-4711-.pdf"], [], None, False, set(), M2, b.cue_regex(M2), {})[0] == "none")
+LC = lambda t: b.long_number_codes(t, M2)
+check("V9 page 1: the last 4 of a longer account number after Account / Acct / Account Number / A/C",
+      LC("Account Number: 1234567894711")[0] == {"FUND-A"} and LC("Acct 98-7654-0815")[0] == {"FUND-B"} and LC("A/C 0000004711")[0] == {"FUND-A"})
+check("V10 page 1: an account number that is not mapped -> seen, no code; no account number -> not seen",
+      LC("Account 1234567890000") == (set(), True) and LC("Total 1,234.56") == (set(), False))
 print(f"\n{sum(R)}/{len(R)} passed")

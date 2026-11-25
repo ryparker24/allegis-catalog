@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS ops.bank_page_read (
   read_at      timestamptz NOT NULL DEFAULT now()
 );
 REVOKE ALL ON ops.bank_page_read FROM PUBLIC;
+-- v2 (R-068): what the wider page-1 pattern finds, and whether page 1 shows any account number at all (codes / a flag only)
+ALTER TABLE ops.bank_page_read ADD COLUMN IF NOT EXISTS codes_v2 text[];
+ALTER TABLE ops.bank_page_read ADD COLUMN IF NOT EXISTS has_account_number boolean;
 
 ALTER TABLE cat.file_signal DROP CONSTRAINT IF EXISTS file_signal_source_check;
 ALTER TABLE cat.file_signal ADD CONSTRAINT file_signal_source_check CHECK (source = ANY (ARRAY['name'::text, 'path'::text, 'drive'::text, 'mime'::text, 'bank'::text]));
@@ -41,5 +44,16 @@ VALUES ('BANK-L4', 1, 'entity', 'content',
         'CAT-WO-16: the account''s last 4 digits (ref.bank_account) as a whole 4-digit token after an account cue (x1234, ****1234, '
         '"ending 1234", acct...1234) -> entity; file name, then folder path, then page 1. A person''s entity is never touched; a '
         'contradiction with a machine entity goes to Content disagrees.', true, false)   -- not provisional: pages --seed-rules never removes it
+ON CONFLICT (rule_id, version) DO NOTHING;
+
+-- BANK-L4 v2 (R-068, pending Ryan's ruling): v1 plus (a) a mapped 4-digit token set off by - _ . or spaces in the FILE NAME
+-- (not inside a date-shaped run; two different mapped accounts in one name = ambiguous) and (b) on page 1, the last 4 of a longer
+-- account number after Account / Acct / Account Number / A/C. Inactive until Ryan rules (the dry run passes the version).
+INSERT INTO ops.decomposition_rule (rule_id, version, field, applies_to, pattern, value, priority, active, notes, multi, provisional)
+VALUES ('BANK-L4', 2, 'entity', 'content',
+        '{"kinds": ["bank_stmt", "wire_confirmation"], "no_kind_folder": "03-Cash", "order": ["name", "path", "page1"], "mode": "apply", "name_delimited": true, "page_long": true}',
+        'BANK-L4', 5, false,
+        'CAT-WO-16 v2 (R-068 pending): v1 + a delimited 4-digit token in the file name (date-shaped runs skipped) + the last 4 of '
+        'a longer account number after an account cue on page 1. Inactive until ruled.', true, false)
 ON CONFLICT (rule_id, version) DO NOTHING;
 COMMIT;
